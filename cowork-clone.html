@@ -333,7 +333,7 @@ a:hover{text-decoration:underline}
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
           </button>
         </div>
-        <div style="text-align:center;padding:6px 0;font-size:11px;color:var(--text3)">Shift+Enter로 줜 바꿈 | 브리지 명령: /ps, /cmd, /read, /ls</div>
+        <div style="text-align:center;padding:6px 0;font-size:11px;color:var(--text3)">Shift+Enter로 줄 바꿈 | 브리지 명령: /ps, /cmd, /read, /ls</div>
       </div>
     </div>
   </div>
@@ -452,6 +452,7 @@ const state = {
   activeChat: localStorage.getItem('cc_activeChat') || null,
   displayedIds: new Set(),
   polling: false,
+  msgQueue: [],
   bridgeOk: false,
   pcTarget: 'company',
   sessionId: 'session-' + Date.now() + '-' + Math.random().toString(36).substr(2, 8)
@@ -600,6 +601,110 @@ function clearMessages() {
   document.getElementById('messages').innerHTML = '<div class="msg-container"><div class="welcome" id="welcome" style="display:none"><div class="welcome-icon">CR</div><h2>Claude Cowork Clone</h2><p>회사 PC에서 Claude의 도움을 받으세요.<br>Supabase를 통해 안전하게 연결됩니다.</p><div class="tips"><div class="tip" onclick="quickSend(\'안녕하세요\')">👋 인사말</div><div class="tip" onclick="quickSend(\'도움말을 보여주세요\')">❓ 도움말</div><div class="tip" onclick="quickSend(\'시스템 상태 확인\')">🖥 상태 확인</div></div><div class="quick-actions" style="margin-top:24px;justify-content:center"><button class="quick-btn" onclick="quickPPT()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 7h10v5H7z" fill="#c4956a"/></svg> PPT 만들기</button><button class="quick-btn" onclick="quickExcel()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 7h3v3H7zm4 0h3v3h-3zm0 4h3v3h-3z" fill="#4caf50"/></svg> Excel 만들기</button><button class="quick-btn" onclick="quickPDF()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 10l5 5 5-5" stroke="#ef5350" stroke-width="2" fill="none"/></svg> PDF 만들기</button></div></div></div></div>';
 }
 
+function parseContent(c) {
+  if (!c) return '';
+  try {
+    var j = (typeof c === 'string') ? JSON.parse(c) : c;
+    if (!j || typeof j !== 'object') return c;
+
+    var parts = [];
+
+    // Thinking section
+    if (j.thinking) {
+      var thinkPreview = j.thinking.length > 500 ? j.thinking.substring(0, 500) + '...' : j.thinking;
+      parts.push('<div style="background:var(--thinking-bg);border:1px solid var(--thinking-border);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--text2)">'
+        + '<div style="font-weight:600;margin-bottom:4px;color:var(--accent)">💭 사고 과정</div>'
+        + thinkPreview.replace(/\n/g, '<br>') + '</div>');
+    }
+
+    // Main text
+    if (j.text) {
+      parts.push(j.text);
+    }
+
+    // Tools section
+    if (j.tools && j.tools.length > 0) {
+      parts.push('\n\n---\n**🔧 실행된 도구 (' + j.tools.length + '개):**\n');
+      for (var i = 0; i < j.tools.length; i++) {
+        var t = j.tools[i];
+        var icon = t.success ? '✅' : '❌';
+        parts.push(icon + ' **' + (t.name || 'unknown') + '**' + (t.target ? ' → `' + t.target + '`' : ''));
+        if (t.result) {
+          // Check if result is a base64 screenshot
+          if (typeof t.result === 'string' && t.result.length > 500 && /^[A-Za-z0-9+/=\s]+$/.test(t.result.substring(0, 100))) {
+            parts.push('\n📸 스크린샷:\n\n<img src="data:image/jpeg;base64,' + t.result.trim() + '" style="max-width:100%;border-radius:8px;border:1px solid var(--border);margin:4px 0">');
+          } else {
+            var resultStr = (typeof t.result === 'string') ? t.result : JSON.stringify(t.result);
+            if (resultStr.length > 300) resultStr = resultStr.substring(0, 300) + '...';
+            parts.push('\n```\n' + resultStr + '\n```');
+          }
+        }
+        parts.push('');
+      }
+    }
+
+    // Duration info
+    if (j.duration || j.loops) {
+      var info = [];
+      if (j.duration) {
+        var durVal = typeof j.duration === 'string' ? parseFloat(j.duration) : j.duration;
+        if (durVal > 100) durVal = durVal / 1000; // convert ms to seconds
+        info.push('⏱ ' + durVal.toFixed(1) + '초');
+      }
+      if (j.loops) info.push('🔄 ' + j.loops + '회 루프');
+      parts.push('\n<div style="font-size:11px;color:var(--text3);margin-top:6px">' + info.join(' | ') + '</div>');
+    }
+
+    return parts.join('\n') || c;
+  } catch(e) {
+    return c;
+  }
+}
+
+// ★ Parse streaming content - shows real-time steps
+function parseStreamingContent(c) {
+  if (!c) return '';
+  try {
+    var j = (typeof c === 'string') ? JSON.parse(c) : c;
+    if (!j || typeof j !== 'object') return c;
+
+    var parts = [];
+
+    // Current step indicator
+    if (j.step) {
+      parts.push('<div style="font-size:13px;color:var(--accent);font-weight:600;margin-bottom:8px">' + esc(j.step) + '</div>');
+    }
+
+    // Step history log
+    if (j.steps && j.steps.length > 0) {
+      parts.push('<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);font-family:Consolas,D2Coding,monospace;line-height:1.8">');
+      for (var i = 0; i < j.steps.length; i++) {
+        parts.push('<div>' + esc(j.steps[i]) + '</div>');
+      }
+      parts.push('</div>');
+    }
+
+    // Partial text from Claude (if any)
+    if (j.text) {
+      parts.push('<div style="margin-top:8px">' + j.text + '</div>');
+    }
+
+    // Tools executed so far
+    if (j.tools && j.tools.length > 0) {
+      parts.push('<div style="margin-top:8px;font-size:12px;color:var(--text3)">실행된 도구: ' + j.tools.length + '개</div>');
+      for (var ti = Math.max(0, j.tools.length - 3); ti < j.tools.length; ti++) {
+        var t = j.tools[ti];
+        var icon = t.success ? '✅' : '❌';
+        parts.push('<div style="font-size:12px;color:var(--text2)">' + icon + ' ' + esc(t.name || 'unknown') + (t.target ? ' → ' + esc(t.target.substring(0, 50)) : '') + '</div>');
+      }
+    }
+
+    return parts.join('\n') || '';
+  } catch(e) {
+    return '<div style="color:var(--accent)">처리 중...</div>';
+  }
+}
+
 function appendMessage(msg) {
   const container = document.querySelector('.msg-container');
   if (!container) return;
@@ -608,11 +713,12 @@ function appendMessage(msg) {
   group.className = 'msg-group';
 
   const isUser = msg.role === 'user';
+  const displayContent = isUser ? msg.content : parseContent(msg.content);
   group.innerHTML = `
     <div class="msg-row ${isUser ? 'user' : 'assistant'}">
       <div class="avatar ${isUser ? 'av-user' : 'av-ai'}">${isUser ? '나' : 'AI'}</div>
       <div class="msg-body">
-        <div class="bubble">${renderContent(msg.content)}</div>
+        <div class="bubble">${renderContent(displayContent)}</div>
         <div class="msg-time">
           <span class="time-label">${new Date(msg.created_at || Date.now()).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
         </div>
@@ -709,13 +815,19 @@ async function handleSend() {
   saveMessages(state.activeChat, msgs);
   document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 
+  if (state.polling) {
+    // Queue message if already waiting for a response
+    state.msgQueue.push({ msgId, chatId: state.activeChat, text, created_at: msg.created_at });
+    showWaiting('대기열에 추가됨 (' + state.msgQueue.length + '개 대기 중)...');
+    return;
+  }
+
   try {
     await SUPA.post('messages', {
       id: msgId,
       chat_id: state.activeChat,
       role: 'user',
       content: text,
-      session_id: state.sessionId,
       status: 'pending',
       created_at: msg.created_at
     });
@@ -723,6 +835,26 @@ async function handleSend() {
     pollForResponse(state.activeChat, msg.created_at);
   } catch (e) {
     toast('메시지 전송 실패: ' + e.message);
+  }
+}
+
+async function processQueue() {
+  if (state.msgQueue.length === 0) return;
+  const next = state.msgQueue.shift();
+  try {
+    await SUPA.post('messages', {
+      id: next.msgId,
+      chat_id: next.chatId,
+      role: 'user',
+      content: next.text,
+      status: 'pending',
+      created_at: next.created_at
+    });
+    showWaiting('Claude가 생각하는 중... (남은 대기: ' + state.msgQueue.length + '개)');
+    pollForResponse(next.chatId, next.created_at);
+  } catch (e) {
+    toast('큐 메시지 전송 실패: ' + e.message);
+    processQueue(); // try next in queue
   }
 }
 
@@ -736,7 +868,7 @@ function quickPPT() {
 }
 
 function quickExcel() {
-  quickSend('Excel 스프레드시트를 만들어주세요. 월별 판매 데이터가 폨함되어야 합니다.');
+  quickSend('Excel 스프레드시트를 만들어주세요. 월별 판매 데이터가 포함되어야 합니다.');
 }
 
 function quickPDF() {
@@ -771,22 +903,35 @@ function showWaiting(label) {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-async function pollForResponse(chatId, afterTime, maxAttempts = 60) {
+async function pollForResponse(chatId, afterTime, maxAttempts = 90) {
   if (state.polling) return;
   state.polling = true;
   let elapsed = 0;
+  let streamingId = null;
+  let lastContent = '';
 
   for (let i = 0; i < maxAttempts; i++) {
     try {
-      // Get assistant messages for this session after the user's message time
-      const filter = 'session_id=eq.' + state.sessionId + '&role=eq.assistant&order=created_at.desc&limit=1';
+      const filter = 'chat_id=eq.' + chatId + '&role=eq.assistant&order=created_at.desc&limit=1';
       const responses = await SUPA.get('messages', filter);
 
       if (responses.length > 0) {
         const resp = responses[0];
-        if (!state.displayedIds.has(resp.id) && (!afterTime || resp.created_at > afterTime)) {
+
+        // Streaming: show partial content in real-time (pass raw content for step display)
+        if (resp.status === 'streaming' && (!afterTime || resp.created_at > afterTime)) {
+          streamingId = resp.id;
+          if (resp.content !== lastContent) {
+            lastContent = resp.content;
+            updateStreamingDisplay(resp.content, elapsed);
+          }
+        }
+        // Completed: show final result
+        else if ((resp.status === 'completed' || resp.status === 'pending') && !state.displayedIds.has(resp.id) && (!afterTime || resp.created_at > afterTime)) {
           const waiting = document.getElementById('waitingMarker');
           if (waiting) waiting.remove();
+          const streamEl = document.getElementById('streamingMsg');
+          if (streamEl) streamEl.remove();
 
           appendMessage(resp);
           state.displayedIds.add(resp.id);
@@ -795,18 +940,20 @@ async function pollForResponse(chatId, afterTime, maxAttempts = 60) {
           saveMessages(chatId, msgs);
           document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
           state.polling = false;
+          processQueue();
           return;
         }
       }
 
-      // Update waiting label with elapsed time
       elapsed += 2;
-      const waitLabel = document.querySelector('#waitingMarker .waiting-label');
-      if (waitLabel) {
-        if (elapsed < 10) waitLabel.textContent = 'Claude가 생각하는 중...';
-        else if (elapsed < 30) waitLabel.textContent = `Claude가 작업 중... (${elapsed}초)`;
-        else if (elapsed < 60) waitLabel.textContent = `Claude가 복잡한 작업 처리 중... (${elapsed}초)`;
-        else waitLabel.textContent = `대기 중... (${elapsed}초) - 시간이 걸릴 수 있습니다`;
+      if (!streamingId) {
+        const waitLabel = document.querySelector('#waitingMarker .waiting-label');
+        if (waitLabel) {
+          if (elapsed < 10) waitLabel.textContent = 'Claude가 생각하는 중...';
+          else if (elapsed < 30) waitLabel.textContent = `Claude가 작업 중... (${elapsed}초)`;
+          else if (elapsed < 60) waitLabel.textContent = `Claude가 복잡한 작업 처리 중... (${elapsed}초)`;
+          else waitLabel.textContent = `대기 중... (${elapsed}초)`;
+        }
       }
     } catch (e) {
       console.error('Poll error:', e);
@@ -818,7 +965,42 @@ async function pollForResponse(chatId, afterTime, maxAttempts = 60) {
   state.polling = false;
   const waiting = document.getElementById('waitingMarker');
   if (waiting) waiting.remove();
-  toast('응답 시간 초과 (2분). 다시 시도해주세요.');
+  const streamEl = document.getElementById('streamingMsg');
+  if (streamEl) streamEl.remove();
+  toast('응답 시간 초과 (3분). 다시 시도해주세요.');
+  processQueue();
+}
+
+function updateStreamingDisplay(rawContent, elapsed) {
+  const waiting = document.getElementById('waitingMarker');
+  if (waiting) waiting.remove();
+
+  let streamEl = document.getElementById('streamingMsg');
+  if (!streamEl) {
+    streamEl = document.createElement('div');
+    streamEl.id = 'streamingMsg';
+    streamEl.className = 'msg-container';
+    document.getElementById('messages').appendChild(streamEl);
+  }
+
+  // Use streaming-specific parser for real-time step display
+  const displayHtml = parseStreamingContent(rawContent);
+
+  streamEl.innerHTML = `
+    <div class="msg-group">
+      <div class="msg-row assistant">
+        <div class="avatar av-ai">AI</div>
+        <div class="msg-body">
+          <div class="bubble">${displayHtml}</div>
+          <div class="msg-time" style="color:var(--orange)">
+            <span class="typing-dots" style="display:inline-flex;gap:2px;vertical-align:middle"><span></span><span></span><span></span></span>
+            실시간 작업 중... (${elapsed}초)
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
 }
 
 // ============================================================
@@ -888,7 +1070,7 @@ async function bridgeCmd(action, target, content) {
     try {
       const [cmd] = await SUPA.get('commands', 'id=eq.' + cmdId + '&select=status,result');
       if (cmd && (cmd.status === 'completed' || cmd.status === 'error')) {
-        return cmd.result || '실행둨';
+        return cmd.result || '실행됨';
       }
     } catch (e) {
       console.error('Poll cmd error:', e);
@@ -1182,9 +1364,10 @@ window.addEventListener('load', () => {
   checkBridgeStatus();
   setInterval(checkBridgeStatus, 5000);
 
-  // Keyboard shortcuts
-  document.addEventListener('keydown', e => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+  // Keyboard shortcuts - Enter to send, Shift+Enter for newline
+  document.getElementById('input').addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
       handleSend();
     }
   });
