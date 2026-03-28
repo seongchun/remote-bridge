@@ -1365,8 +1365,13 @@ window.addEventListener('load', () => {
   setInterval(checkBridgeStatus, 5000);
 
   // Keyboard shortcuts - Enter to send, Shift+Enter for newline
-  document.getElementById('input').addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  // Korean IME compatible: keyCode 229 = IME processing, skip it
+  const _inp = document.getElementById('input');
+  let _composing = false;
+  _inp.addEventListener('compositionstart', () => { _composing = true; });
+  _inp.addEventListener('compositionend', () => { _composing = false; });
+  _inp.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !_composing && e.keyCode !== 229) {
       e.preventDefault();
       handleSend();
     }
