@@ -33,10 +33,15 @@ function buildSystemPrompt(bridgeStatus) {
 - 실패 결과만 보여주는 것은 절대 금지. 반드시 대안을 시도하라.
 - "시도했는데 안됐습니다"라고 보고하는 건 무의미하다. 성공할 때까지 시도하라.
 
-## ★★★ 실시간 보고 규칙 ★★★
-- 매 단계마다 무엇을 하고 있는지 한국어로 설명하라.
-- bridge-command 실행 전에 반드시 "~하겠습니다" 형태로 의도를 밝혀라.
-- 결과를 받으면 성공/실패 여부와 다음 계획을 설명하라.
+## ★★★ 실시간 서술 규칙 (가장 중요!) ★★★
+- 너의 모든 사고 과정과 행동을 사용자가 실시간으로 읽는다. 마치 옆에서 설명하듯이 써라.
+- bridge-command 실행 전: "현재 화면을 확인하기 위해 스크린샷을 찍겠습니다." 처럼 의도를 반드시 먼저 설명
+- bridge-command 실행 후 결과 분석: "스크린샷을 확인해보니 EP 포털이 열려 있고, 상단에 메일 아이콘이 보입니다." 처럼 상세 분석
+- 실패 시: "클릭이 작동하지 않았습니다. 좌표가 정확하지 않았을 수 있습니다. 다시 시도하겠습니다." 처럼 실패 원인 분석 + 대안 설명
+- 성공 시: "메일 창이 성공적으로 열렸습니다." 처럼 결과 설명
+- 사용자 선택 필요 시: "두 가지 방법이 있습니다: 1) A 방법 2) B 방법. 어떤 것을 시도할까요?" 처럼 옵션 제시
+- ★ 절대 bridge-command만 나열하지 마라. 반드시 설명 텍스트를 사이사이에 넣어라.
+- ★ 도구 실행 결과만 보여주는 것은 금지. 네가 무엇을 보고 무엇을 판단했는지 반드시 서술하라.
 
 ## 브리지: ${alive ? '✅ 온라인' : '❌ 오프라인'}
 
@@ -382,7 +387,7 @@ async function processMessage(msg) {
   const { id, chat_id, content } = msg;
   log('New msg: "' + content.substring(0, 60) + (content.length > 60 ? '...' : '') + '"');
 
-  const allTools = [], allThinking = [], stepLog = [];
+  const allTools = [], allThinking = [], stepLog = [], narrative = [];
   let finalText = '', totalThinkTime = 0, totalDur = 0;
 
   try {
@@ -415,6 +420,7 @@ async function processMessage(msg) {
         text: finalText || '',
         thinking: allThinking.join('\n---\n') || null,
         tools: allTools,
+        narrative: narrative,
         step: '🧠 Claude에게 분석 요청 중... (루프 ' + (loop + 1) + ')',
         loop: loop + 1,
         steps: stepLog.slice(-10)
@@ -429,6 +435,10 @@ async function processMessage(msg) {
       const perms = extractPermissions(result.text);
       const clean = cleanText(result.text);
 
+      // ★ Add to narrative: thinking + text
+      if (result.thinking) narrative.push({type:'thinking', content: result.thinking, duration: result.thinkingTime});
+      if (clean) narrative.push({type:'text', content: clean});
+
       // ★ Stream: Claude 응답 수신
       stepLog.push('📝 Claude 응답 수신 (' + result.duration + ')');
       if (clean) {
@@ -440,6 +450,7 @@ async function processMessage(msg) {
         log('Permission request, stopping loop');
         await finalizeStreamingMessage(chat_id, id, {
           text: clean, thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
           permissions: perms, thinkingTime: totalThinkTime.toFixed(1) + 's',
           duration: totalDur.toFixed(1) + 's', loops: loop + 1, steps: stepLog
         });
@@ -459,6 +470,7 @@ async function processMessage(msg) {
         stepLog.push('🔌 브리지 연결 확인 중...');
         await updateStreamingMessage(chat_id, {
           text: clean || '', thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
           step: '🔌 브리지 연결 확인 중...', loop: loop + 1, steps: stepLog.slice(-10)
         });
         const ok = await quickPing();
@@ -475,6 +487,7 @@ async function processMessage(msg) {
       stepLog.push('⚡ 브리지 명령 ' + cmds.length + '개 실행 중...');
       await updateStreamingMessage(chat_id, {
         text: clean || '', thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
         step: '⚡ 브리지 명령 ' + cmds.length + '개 실행 중...',
         loop: loop + 1, steps: stepLog.slice(-10),
         commands: cmds.map(c => c.action)
@@ -490,6 +503,7 @@ async function processMessage(msg) {
         stepLog.push('  🔧 [' + (ci + 1) + '/' + cmds.length + '] ' + cmdDesc);
         await updateStreamingMessage(chat_id, {
           text: clean || '', thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
           step: '🔧 명령 실행 중 [' + (ci + 1) + '/' + cmds.length + ']: ' + cmd.action,
           loop: loop + 1, steps: stepLog.slice(-10)
         });
@@ -514,11 +528,13 @@ async function processMessage(msg) {
         };
         allTools.push(entry);
         loopResults.push(entry);
+        narrative.push({type:'tool', action: cmd.action, target: cmd.target || (cmd.content || '').substring(0,80), result: (r.result || '').substring(0,2000), success: r.success});
 
         // ★ Stream: 명령 결과
         stepLog.push('  ' + (r.success ? '✅' : '❌') + ' ' + cmd.action + ': ' + resultPreview.substring(0, 80));
         await updateStreamingMessage(chat_id, {
           text: clean || '', thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
           step: (r.success ? '✅' : '❌') + ' ' + cmd.action + ' ' + (r.success ? '성공' : '실패'),
           loop: loop + 1, steps: stepLog.slice(-10)
         });
@@ -551,6 +567,7 @@ async function processMessage(msg) {
       stepLog.push('🔄 결과 분석 후 다음 단계 결정 중...');
       await updateStreamingMessage(chat_id, {
         text: clean || '', thinking: allThinking.join('\n---\n') || null, tools: allTools,
+        narrative: narrative,
         step: '🔄 결과 분석 후 다음 단계 결정 중... (루프 ' + (loop + 2) + ')',
         loop: loop + 1, steps: stepLog.slice(-10)
       });
@@ -563,6 +580,8 @@ async function processMessage(msg) {
       text: finalText,
       thinking: allThinking.join('\n---\n') || null,
       tools: allTools,
+      narrative: narrative,
+        narrative: narrative,
       permissions: [],
       thinkingTime: totalThinkTime.toFixed(1) + 's',
       duration: totalDur.toFixed(1) + 's',
@@ -576,7 +595,8 @@ async function processMessage(msg) {
     try {
       await finalizeStreamingMessage(chat_id, id, {
         text: '⚠️ 오류: ' + error.message + '\n다시 시도해주세요.',
-        thinking: null, tools: allTools, permissions: [],
+        thinking: null, tools: allTools,
+        narrative: narrative, permissions: [],
         thinkingTime: '0s', duration: '0s', loops: 0, steps: stepLog
       });
     } catch(e2) {
