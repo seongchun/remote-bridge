@@ -218,11 +218,18 @@ async function finalizeStreamingMessage(chatId, userMsgId, data) {
 // Bridge health
 async function checkBridgeHealth() {
   try {
+    // 1) Check last completed command timestamp
     const r = await supaFetch('GET', '/commands?status=eq.completed&order=created_at.desc&limit=1&select=id,created_at');
-    if (!r || !r.length) return { alive: false, lastSeen: '기록 없음' };
-    const t = new Date(r[0].created_at);
-    const d = (Date.now() - t) / 60000;
-    return { alive: d < 5, lastSeen: t.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }), minutesAgo: Math.round(d) };
+    if (r && r.length) {
+      const t = new Date(r[0].created_at);
+      const d = (Date.now() - t) / 60000;
+      if (d < 5) return { alive: true, lastSeen: t.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }), minutesAgo: Math.round(d) };
+    }
+    // 2) Timestamp stale or no records -> active ping to confirm
+    log('Bridge timestamp stale, sending active ping...');
+    const ok = await quickPing();
+    if (ok) return { alive: true, lastSeen: '방금 ping 응답', minutesAgo: 0 };
+    return { alive: false, lastSeen: r && r.length ? new Date(r[0].created_at).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' }) : '기록 없음' };
   } catch(e) { return { alive: false, lastSeen: '확인 실패' }; }
 }
 
