@@ -121,11 +121,32 @@ a:hover{text-decoration:underline}
 .progress-panel .step-item.done{color:var(--green)}
 .progress-panel .step-item .step-icon{width:14px;text-align:center}
 
-/* Tool blocks */
+/* Narrative tool cards - inline in text flow */
+.ntool{margin:10px 0;border-radius:10px;overflow:hidden;font-size:12.5px;border:1px solid var(--border);transition:all .2s}
+.ntool.ok{border-color:rgba(76,175,80,.3);background:rgba(76,175,80,.04)}
+.ntool.fail{border-color:rgba(239,83,80,.3);background:rgba(239,83,80,.04)}
+.ntool.running{border-color:rgba(196,149,106,.4);background:rgba(196,149,106,.06);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.7}}
+.ntool-head{padding:8px 14px;display:flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.ntool-head:hover{background:rgba(255,255,255,.03)}
+.ntool-icon{font-size:14px;flex-shrink:0}
+.ntool-action{font-weight:600;color:var(--blue)}
+.ntool.ok .ntool-action{color:var(--green)}
+.ntool.fail .ntool-action{color:var(--red)}
+.ntool.running .ntool-action{color:var(--accent)}
+.ntool-target{color:var(--text3);margin-left:4px;font-family:'Consolas','D2Coding',monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:300px}
+.ntool-arrow{margin-left:auto;font-size:10px;color:var(--text3);transition:transform .15s;flex-shrink:0}
+.ntool.expanded .ntool-arrow{transform:rotate(90deg)}
+.ntool-body{display:none;padding:0 14px 10px;max-height:300px;overflow-y:auto}
+.ntool.expanded .ntool-body{display:block}
+.ntool-body pre{background:var(--code-bg);padding:8px 10px;border-radius:6px;font-family:'Consolas','D2Coding',monospace;font-size:11px;color:var(--text2);white-space:pre-wrap;word-break:break-all;margin:4px 0}
+.ntool-body img{max-width:100%;border-radius:8px;border:1px solid var(--border);margin:4px 0}
+.ntext{margin:4px 0;line-height:1.7;color:var(--text)}
+.ntext p{margin:4px 0}
+.nfooter{font-size:11px;color:var(--text3);margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:12px}
+/* Legacy tool blocks */
 .tool-block{margin:8px 0;padding:10px 14px;background:rgba(66,165,245,.06);border:1px solid rgba(66,165,245,.15);border-radius:8px;font-size:12px}
 .tool-block .tool-name{font-weight:600;color:var(--blue);margin-bottom:2px;display:flex;align-items:center;gap:6px}
-.tool-block .tool-name .tool-icon{font-size:14px}
-.tool-block .tool-input{color:var(--text2);font-family:'Consolas',monospace;font-size:11.5px;margin-top:4px}
 .tool-block .tool-result{margin-top:6px;background:var(--code-bg);padding:8px 10px;border-radius:6px;font-family:'Consolas',monospace;font-size:11.5px;color:var(--text2);max-height:200px;overflow-y:auto;white-space:pre-wrap}
 .tool-block.tool-success{border-color:rgba(76,175,80,.25);background:rgba(76,175,80,.06)}
 .tool-block.tool-success .tool-name{color:var(--green)}
@@ -601,108 +622,93 @@ function clearMessages() {
   document.getElementById('messages').innerHTML = '<div class="msg-container"><div class="welcome" id="welcome" style="display:none"><div class="welcome-icon">CR</div><h2>Claude Cowork Clone</h2><p>회사 PC에서 Claude의 도움을 받으세요.<br>Supabase를 통해 안전하게 연결됩니다.</p><div class="tips"><div class="tip" onclick="quickSend(\'안녕하세요\')">👋 인사말</div><div class="tip" onclick="quickSend(\'도움말을 보여주세요\')">❓ 도움말</div><div class="tip" onclick="quickSend(\'시스템 상태 확인\')">🖥 상태 확인</div></div><div class="quick-actions" style="margin-top:24px;justify-content:center"><button class="quick-btn" onclick="quickPPT()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 7h10v5H7z" fill="#c4956a"/></svg> PPT 만들기</button><button class="quick-btn" onclick="quickExcel()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 7h3v3H7zm4 0h3v3h-3zm0 4h3v3h-3z" fill="#4caf50"/></svg> Excel 만들기</button><button class="quick-btn" onclick="quickPDF()"><svg viewBox="0 0 24 24" fill="currentColor"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M7 10l5 5 5-5" stroke="#ef5350" stroke-width="2" fill="none"/></svg> PDF 만들기</button></div></div></div></div>';
 }
 
+// ★★★ NARRATIVE RENDERING ENGINE ★★★
+function toolLabel(a) {
+  var m = {screenshot:'화면 캡처',click:'마우스 클릭',double_click:'더블클릭',type_text:'텍스트 입력',key_send:'키 입력',
+    run_ps:'PowerShell 실행',run_cmd:'CMD 실행',read_file:'파일 읽기',write_file:'파일 쓰기',list_dir:'폴더 목록',
+    list_windows:'창 목록',activate_window:'창 활성화',start_app:'앱 실행',bridge_offline:'브리지 오프라인'};
+  return m[a] || a;
+}
+function isB64Img(s) { return typeof s === 'string' && s.length > 500 && /^[A-Za-z0-9+\/=\s]+$/.test(s.substring(0,100)); }
+
+function renderToolCard(t, live) {
+  var cls = live ? 'running' : (t.success ? 'ok' : 'fail');
+  var icon = live ? '⏳' : (t.success ? '✅' : '❌');
+  var label = toolLabel(t.action || t.name || '?');
+  var tgt = (t.target || ''); if (tgt.length > 60) tgt = tgt.substring(0,60) + '...';
+  var body = '';
+  if (t.result) {
+    if (isB64Img(t.result)) { body = '<img src="data:image/jpeg;base64,' + t.result.trim() + '" loading="lazy">'; }
+    else { var r = typeof t.result === 'string' ? t.result : JSON.stringify(t.result); if (r.length > 800) r = r.substring(0,800) + '...'; body = '<pre>' + esc(r) + '</pre>'; }
+  }
+  return '<div class="ntool ' + cls + '" onclick="this.classList.toggle(\'expanded\')">' +
+    '<div class="ntool-head"><span class="ntool-icon">' + icon + '</span><span class="ntool-action">' + esc(label) + '</span>' +
+    (tgt ? '<span class="ntool-target">' + esc(tgt) + '</span>' : '') +
+    (body ? '<span class="ntool-arrow">▶</span>' : '') + '</div>' +
+    (body ? '<div class="ntool-body">' + body + '</div>' : '') + '</div>';
+}
+
+function renderThinkBlock(thinking, dur) {
+  if (!thinking) return '';
+  var p = thinking.length > 600 ? thinking.substring(0,600) + '...' : thinking;
+  return '<div class="thinking-block"><div class="thinking-header" onclick="this.classList.toggle(\'open\')"><span class="arrow">▶</span><span class="label">사고 과정</span>' +
+    (dur ? '<span class="dur">' + dur + '</span>' : '') + '</div><div class="thinking-body">' + esc(p) + '</div></div>';
+}
+
+function renderNarrative(items) {
+  if (!items || !items.length) return '';
+  var h = '';
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    if (it.type === 'thinking') h += renderThinkBlock(it.content, it.duration);
+    else if (it.type === 'text') { try { h += '<div class="ntext">' + marked.parse(it.content || '') + '</div>'; } catch(e) { h += '<div class="ntext">' + esc(it.content) + '</div>'; } }
+    else if (it.type === 'tool') h += renderToolCard(it, false);
+  }
+  return h;
+}
+
 function parseContent(c) {
   if (!c) return '';
   try {
     var j = (typeof c === 'string') ? JSON.parse(c) : c;
     if (!j || typeof j !== 'object') return c;
-
-    var parts = [];
-
-    // Thinking section
-    if (j.thinking) {
-      var thinkPreview = j.thinking.length > 500 ? j.thinking.substring(0, 500) + '...' : j.thinking;
-      parts.push('<div style="background:var(--thinking-bg);border:1px solid var(--thinking-border);border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:12px;color:var(--text2)">'
-        + '<div style="font-weight:600;margin-bottom:4px;color:var(--accent)">💭 사고 과정</div>'
-        + thinkPreview.replace(/\n/g, '<br>') + '</div>');
-    }
-
-    // Main text
-    if (j.text) {
-      parts.push(j.text);
-    }
-
-    // Tools section
-    if (j.tools && j.tools.length > 0) {
-      parts.push('\n\n---\n**🔧 실행된 도구 (' + j.tools.length + '개):**\n');
-      for (var i = 0; i < j.tools.length; i++) {
-        var t = j.tools[i];
-        var icon = t.success ? '✅' : '❌';
-        parts.push(icon + ' **' + (t.name || 'unknown') + '**' + (t.target ? ' → `' + t.target + '`' : ''));
-        if (t.result) {
-          // Check if result is a base64 screenshot
-          if (typeof t.result === 'string' && t.result.length > 500 && /^[A-Za-z0-9+/=\s]+$/.test(t.result.substring(0, 100))) {
-            parts.push('\n📸 스크린샷:\n\n<img src="data:image/jpeg;base64,' + t.result.trim() + '" style="max-width:100%;border-radius:8px;border:1px solid var(--border);margin:4px 0">');
-          } else {
-            var resultStr = (typeof t.result === 'string') ? t.result : JSON.stringify(t.result);
-            if (resultStr.length > 300) resultStr = resultStr.substring(0, 300) + '...';
-            parts.push('\n```\n' + resultStr + '\n```');
-          }
-        }
-        parts.push('');
-      }
-    }
-
-    // Duration info
-    if (j.duration || j.loops) {
+    var html = '';
+    // ★ NARRATIVE MODE
+    if (j.narrative && j.narrative.length > 0) {
+      html = renderNarrative(j.narrative);
       var info = [];
-      if (j.duration) {
-        var durVal = typeof j.duration === 'string' ? parseFloat(j.duration) : j.duration;
-        if (durVal > 100) durVal = durVal / 1000; // convert ms to seconds
-        info.push('⏱ ' + durVal.toFixed(1) + '초');
-      }
+      if (j.duration) { var d = typeof j.duration === 'string' ? parseFloat(j.duration) : j.duration; if (d > 100) d = d/1000; info.push('⏱ ' + d.toFixed(1) + '초'); }
       if (j.loops) info.push('🔄 ' + j.loops + '회 루프');
-      parts.push('\n<div style="font-size:11px;color:var(--text3);margin-top:6px">' + info.join(' | ') + '</div>');
+      if (j.thinkingTime && j.thinkingTime !== '0.0s') info.push('💭 ' + j.thinkingTime);
+      if (info.length) html += '<div class="nfooter">' + info.join(' · ') + '</div>';
+      return html;
     }
-
-    return parts.join('\n') || c;
-  } catch(e) {
-    return c;
-  }
+    // LEGACY MODE
+    if (j.thinking) html += renderThinkBlock(j.thinking, j.thinkingTime);
+    if (j.text) { try { html += '<div class="ntext">' + marked.parse(j.text) + '</div>'; } catch(e) { html += '<div class="ntext">' + esc(j.text) + '</div>'; } }
+    if (j.tools && j.tools.length > 0) { for (var i = 0; i < j.tools.length; i++) html += renderToolCard(j.tools[i], false); }
+    if (j.duration) { var d2 = typeof j.duration === 'string' ? parseFloat(j.duration) : j.duration; if (d2 > 100) d2 = d2/1000; html += '<div class="nfooter">⏱ ' + d2.toFixed(1) + '초</div>'; }
+    return html || c;
+  } catch(e) { return c; }
 }
 
-// ★ Parse streaming content - shows real-time steps
+// ★ Streaming - shows real-time narrative flow
 function parseStreamingContent(c) {
   if (!c) return '';
   try {
     var j = (typeof c === 'string') ? JSON.parse(c) : c;
     if (!j || typeof j !== 'object') return c;
-
-    var parts = [];
-
-    // Current step indicator
+    var html = '';
+    if (j.narrative && j.narrative.length > 0) html = renderNarrative(j.narrative);
     if (j.step) {
-      parts.push('<div style="font-size:13px;color:var(--accent);font-weight:600;margin-bottom:8px">' + esc(j.step) + '</div>');
+      html += '<div style="display:flex;align-items:center;gap:8px;margin:10px 0;font-size:13px;color:var(--accent);font-weight:500">' +
+        '<span class="typing-dots" style="display:inline-flex;gap:3px"><span></span><span></span><span></span></span> ' + esc(j.step) + '</div>';
     }
-
-    // Step history log
-    if (j.steps && j.steps.length > 0) {
-      parts.push('<div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:12px;color:var(--text2);font-family:Consolas,D2Coding,monospace;line-height:1.8">');
-      for (var i = 0; i < j.steps.length; i++) {
-        parts.push('<div>' + esc(j.steps[i]) + '</div>');
-      }
-      parts.push('</div>');
+    if (j.text && (!j.narrative || j.narrative.length === 0)) {
+      try { html += '<div class="ntext">' + marked.parse(j.text) + '</div>'; } catch(e) { html += '<div class="ntext">' + esc(j.text) + '</div>'; }
     }
-
-    // Partial text from Claude (if any)
-    if (j.text) {
-      parts.push('<div style="margin-top:8px">' + j.text + '</div>');
-    }
-
-    // Tools executed so far
-    if (j.tools && j.tools.length > 0) {
-      parts.push('<div style="margin-top:8px;font-size:12px;color:var(--text3)">실행된 도구: ' + j.tools.length + '개</div>');
-      for (var ti = Math.max(0, j.tools.length - 3); ti < j.tools.length; ti++) {
-        var t = j.tools[ti];
-        var icon = t.success ? '✅' : '❌';
-        parts.push('<div style="font-size:12px;color:var(--text2)">' + icon + ' ' + esc(t.name || 'unknown') + (t.target ? ' → ' + esc(t.target.substring(0, 50)) : '') + '</div>');
-      }
-    }
-
-    return parts.join('\n') || '';
-  } catch(e) {
-    return '<div style="color:var(--accent)">처리 중...</div>';
-  }
+    return html || '<div style="color:var(--accent);display:flex;align-items:center;gap:8px"><span class="typing-dots" style="display:inline-flex;gap:3px"><span></span><span></span><span></span></span> 처리 중...</div>';
+  } catch(e) { return '<div style="color:var(--accent)">처리 중...</div>'; }
 }
 
 function appendMessage(msg) {
@@ -732,7 +738,8 @@ function appendMessage(msg) {
 
 function renderContent(content) {
   if (!content) return '';
-
+  // If content has narrative HTML, return as-is (no double markdown parse)
+  if (content.indexOf('<div class="n') !== -1 || content.indexOf('<div class="thinking') !== -1) return content;
   // Parse markdown
   try {
     let html = marked.parse(content);
