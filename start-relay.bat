@@ -4,16 +4,16 @@ title Remote Bridge Relay Worker
 color 0B
 
 echo.
-echo  ╔══════════════════════════════════════════════╗
-echo  ║   Remote Bridge Relay Worker - Home PC       ║
-echo  ╚══════════════════════════════════════════════╝
+echo  ================================================
+echo    Remote Bridge Relay Worker - Home PC
+echo  ================================================
 echo.
 
 :: Check if CoworkRelay folder exists
 set RELAY_DIR=%USERPROFILE%\CoworkRelay
 if not exist "%RELAY_DIR%" (
-    echo [ERROR] %RELAY_DIR% 폴더를 찾을 수 없습니다.
-    echo         먼저 setup-home.bat를 실행해주세요.
+    echo [ERROR] %RELAY_DIR% folder not found.
+    echo         Run setup-home.bat first.
     pause
     exit /b 1
 )
@@ -22,7 +22,7 @@ cd /d "%RELAY_DIR%"
 
 :: Auto-open Bridge Dashboard in browser
 if exist "bridge-dashboard.html" (
-    echo [INFO] Bridge Dashboard 열기...
+    echo [INFO] Opening Bridge Dashboard...
     start "" "bridge-dashboard.html"
 ) else (
     echo [INFO] Dashboard not found locally. Opening from GitHub...
@@ -32,25 +32,25 @@ if exist "bridge-dashboard.html" (
 :: Check Node.js
 where node >nul 2>nul
 if errorlevel 1 (
-    echo [ERROR] Node.js가 설치되어 있지 않습니다.
-    echo         https://nodejs.org 에서 설치해주세요.
+    echo [ERROR] Node.js is not installed.
+    echo         Install from https://nodejs.org
     pause
     exit /b 1
 )
 
 :: Check relay-worker.js
 if not exist "relay-worker.js" (
-    echo [ERROR] relay-worker.js 파일을 찾을 수 없습니다.
+    echo [ERROR] relay-worker.js not found.
     pause
     exit /b 1
 )
 
-echo [INFO] Relay Worker 시작 중...
-echo [INFO] 종료하려면 이 창을 닫거나 Ctrl+C를 누르세요.
+echo [INFO] Starting Relay Worker...
+echo [INFO] Press Ctrl+C or close this window to stop.
 echo.
 
 node relay-worker.js
 
 echo.
-echo [INFO] Relay Worker가 종료되었습니다.
+echo [INFO] Relay Worker stopped.
 pause
