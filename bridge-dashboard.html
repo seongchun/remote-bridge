@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Remote Bridge - PC Dashboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Segoe UI', sans-serif; background: #0d1117; color: #c9d1d9; min-height: 100vh; }
+.header { background: #161b22; border-bottom: 1px solid #30363d; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+.header h1 { font-size: 18px; color: #58a6ff; }
+.header .status { font-size: 13px; color: #8b949e; }
+.container { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+
+/* PC Cards */
+.pc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 16px; }
+.pc-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; cursor: pointer; transition: all 0.2s; }
+.pc-card:hover { border-color: #58a6ff; transform: translateY(-2px); }
+.pc-card.selected { border-color: #3fb950; background: #0d1f0d; }
+.pc-card.offline { opacity: 0.5; }
+.pc-name { font-size: 16px; font-weight: 600; color: #f0f6fc; margin-bottom: 4px; }
+.pc-id { font-size: 12px; color: #8b949e; font-family: monospace; }
+.pc-status { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; margin-top: 8px; }
+.pc-status.online { background: #0d2818; color: #3fb950; }
+.pc-status.offline { background: #2d1b1b; color: #f85149; }
+.pc-last-seen { font-size: 11px; color: #8b949e; margin-top: 6px; }
+
+/* Command Panel */
+.cmd-panel { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; margin-top: 20px; }
+.cmd-panel h2 { font-size: 15px; color: #f0f6fc; margin-bottom: 12px; }
+.cmd-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.cmd-btn { padding: 8px 14px; background: #21262d; border: 1px solid #30363d; color: #c9d1d9; border-radius: 6px; cursor: pointer; font-size: 13px; transition: all 0.15s; }
+.cmd-btn:hover { background: #30363d; border-color: #58a6ff; }
+.cmd-btn.active { background: #0d2d6b; border-color: #58a6ff; color: #58a6ff; }
+
+.result-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; font-family: 'Consolas', monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; margin-top: 12px; color: #8b949e; min-height: 60px; }
+.result-box.has-result { color: #3fb950; }
+.result-box.has-error { color: #f85149; }
+
+.screenshot-img { max-width: 100%; border-radius: 6px; margin-top: 8px; border: 1px solid #30363d; }
+
+/* Manual PC add */
+.manual-add { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+.manual-add input { background: #0d1117; border: 1px solid #30363d; color: #c9d1d9; padding: 8px 12px; border-radius: 6px; font-size: 13px; flex: 1; }
+.manual-add button { padding: 8px 16px; background: #238636; border: none; color: white; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.manual-add button:hover { background: #2ea043; }
+
+.section-title { font-size: 14px; color: #8b949e; margin-top: 20px; margin-bottom: 8px; }
+
+/* Loading spinner */
+.spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; margin-left: 8px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<div class="header">
+    <h1>Remote Bridge Dashboard</h1>
+    <div class="status" id="connStatus">Connecting...</div>
+</div>
+
+<div class="container">
+    <div class="section-title">Connected PCs</div>
+    <div class="pc-grid" id="pcGrid">
+        <div class="pc-card" style="border-style: dashed; text-align: center; padding: 30px; opacity: 0.6;">
+            Loading...
+        </div>
+    </div>
+
+    <div class="manual-add">
+        <input type="text" id="manualPcId" placeholder="PC ID (hostname) directly type..." />
+        <button onclick="addManualPC()">Add PC</button>
+    </div>
+
+    <div class="cmd-panel" id="cmdPanel" style="display:none;">
+        <h2>Target: <span id="targetPcName" style="color:#3fb950;"></span></h2>
+
+        <div class="section-title">Quick Actions</div>
+        <div class="cmd-row">
+            <button class="cmd-btn" onclick="sendCmd('ping')">Ping</button>
+            <button class="cmd-btn" onclick="sendCmd('screenshot')">Screenshot</button>
+            <button class="cmd-btn" onclick="sendCmd('list_windows')">List Windows</button>
+            <button class="cmd-btn" onclick="sendCmd('list_dir', 'C:\\Users')">List Users</button>
+            <button class="cmd-btn" onclick="sendCmd('list_dir', null, 'C:\\Users\\' + prompt('Username?') + '\\Desktop')">Desktop</button>
+        </div>
+
+        <div class="section-title">Custom Command</div>
+        <div class="cmd-row">
+            <select id="cmdAction" style="background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px;border-radius:6px;font-size:13px;">
+                <option value="run_ps">run_ps</option>
+                <option value="run_cmd">run_cmd</option>
+                <option value="click">click</option>
+                <option value="double_click">double_click</option>
+                <option value="type_text">type_text</option>
+                <option value="key_send">key_send</option>
+                <option value="activate_window">activate_window</option>
+                <option value="start_app">start_app</option>
+                <option value="read_file">read_file</option>
+                <option value="write_file">write_file</option>
+            </select>
+            <input type="text" id="cmdContent" placeholder="content / command" style="flex:1;background:#0d1117;border:1px solid #30363d;color:#c9d1d9;padding:8px 12px;border-radius:6px;font-size:13px;" />
+            <button class="cmd-btn" style="background:#238636;border-color:#238636;color:white;" onclick="sendCustomCmd()">Send</button>
+        </div>
+
+        <div class="result-box" id="resultBox">Waiting for command...</div>
+        <div id="screenshotArea"></div>
+    </div>
+</div>
+
+<script>
+const SUPABASE_URL = 'https://rnnigyfzwlgojxyccgsm.supabase.co';
+const ANON_KEY = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
+const REST = SUPABASE_URL + '/rest/v1';
+
+let selectedPcId = null;
+let knownPCs = new Map(); // pc_id -> { hostname, status, last_seen }
+
+// Supabase REST helper
+async function supa(method, path, body = null) {
+    const opts = {
+        method,
+        headers: {
+            'apikey': ANON_KEY,
+            'Authorization': 'Bearer ' + ANON_KEY,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=representation'
+        }
+    };
+    if (body) opts.body = JSON.stringify(body);
+    const res = await fetch(REST + path, opts);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return res.json();
+}
+
+// Discover PCs from recent completed commands
+async function discoverPCs() {
+    try {
+        // Method 1: Check bridge_agents table
+        try {
+            const agents = await supa('GET', '/bridge_agents?select=pc_id,hostname,status,last_seen&order=last_seen.desc');
+            if (agents && agents.length > 0) {
+                agents.forEach(a => {
+                    const ago = a.last_seen ? timeSince(new Date(a.last_seen)) : 'unknown';
+                    const isOnline = a.last_seen && (Date.now() - new Date(a.last_seen).getTime()) < 120000;
+                    knownPCs.set(a.pc_id, {
+                        hostname: a.hostname || a.pc_id,
+                        status: isOnline ? 'online' : 'offline',
+                        last_seen: ago,
+                        source: 'registered'
+                    });
+                });
+            }
+        } catch(e) {
+            // bridge_agents table might not exist
+        }
+
+        // Method 2: Check recent commands for processed_by field
+        try {
+            const cmds = await supa('GET', '/commands?status=eq.completed&processed_by=not.is.null&select=processed_by&order=created_at.desc&limit=20');
+            if (cmds && cmds.length > 0) {
+                const seen = new Set();
+                cmds.forEach(c => {
+                    if (c.processed_by && !seen.has(c.processed_by) && !knownPCs.has(c.processed_by)) {
+                        seen.add(c.processed_by);
+                        knownPCs.set(c.processed_by, {
+                            hostname: c.processed_by,
+                            status: 'unknown',
+                            last_seen: 'from history',
+                            source: 'command_history'
+                        });
+                    }
+                });
+            }
+        } catch(e) {}
+
+        document.getElementById('connStatus').textContent = `Connected | ${knownPCs.size} PC(s) found`;
+        document.getElementById('connStatus').style.color = '#3fb950';
+        renderPCs();
+    } catch(e) {
+        document.getElementById('connStatus').textContent = 'Connection error: ' + e.message;
+        document.getElementById('connStatus').style.color = '#f85149';
+    }
+}
+
+function timeSince(date) {
+    const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (seconds < 60) return seconds + 's ago';
+    if (seconds < 3600) return Math.floor(seconds / 60) + 'm ago';
+    if (seconds < 86400) return Math.floor(seconds / 3600) + 'h ago';
+    return Math.floor(seconds / 86400) + 'd ago';
+}
+
+function renderPCs() {
+    const grid = document.getElementById('pcGrid');
+    if (knownPCs.size === 0) {
+        grid.innerHTML = `
+            <div class="pc-card" style="border-style:dashed;text-align:center;padding:30px;opacity:0.6;">
+                No PCs found yet.<br><small>Run Bridge Agent on company PC first,<br>or type PC ID below to add manually.</small>
+            </div>`;
+        return;
+    }
+
+    grid.innerHTML = '';
+    knownPCs.forEach((info, pcId) => {
+        const card = document.createElement('div');
+        card.className = 'pc-card' + (pcId === selectedPcId ? ' selected' : '') + (info.status === 'offline' ? ' offline' : '');
+        card.onclick = () => selectPC(pcId);
+        card.innerHTML = `
+            <div class="pc-name">${info.hostname.toUpperCase()}</div>
+            <div class="pc-id">pc_id: ${pcId}</div>
+            <span class="pc-status ${info.status}">${info.status}</span>
+            <div class="pc-last-seen">${info.last_seen}</div>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+function selectPC(pcId) {
+    selectedPcId = pcId;
+    const info = knownPCs.get(pcId) || { hostname: pcId };
+    document.getElementById('targetPcName').textContent = `${info.hostname.toUpperCase()} (${pcId})`;
+    document.getElementById('cmdPanel').style.display = 'block';
+    document.getElementById('resultBox').textContent = 'Ready. Select a command.';
+    document.getElementById('resultBox').className = 'result-box';
+    document.getElementById('screenshotArea').innerHTML = '';
+    renderPCs();
+}
+
+function addManualPC() {
+    const input = document.getElementById('manualPcId');
+    const pcId = input.value.trim().toLowerCase();
+    if (!pcId) return;
+    knownPCs.set(pcId, { hostname: pcId, status: 'unknown', last_seen: 'manually added', source: 'manual' });
+    input.value = '';
+    renderPCs();
+    selectPC(pcId);
+}
+
+async function sendCmd(action, target, content) {
+    if (!selectedPcId) { alert('Select a PC first!'); return; }
+
+    const box = document.getElementById('resultBox');
+    box.textContent = `Sending ${action}...`;
+    box.className = 'result-box';
+    document.getElementById('screenshotArea').innerHTML = '';
+
+    try {
+        const cmd = {
+            action: action,
+            target: target || null,
+            content: content || null,
+            pc_id: selectedPcId,
+            status: 'pending'
+        };
+        const result = await supa('POST', '/commands', cmd);
+        const cmdId = result[0]?.id;
+        if (!cmdId) { box.textContent = 'Error: No command ID returned'; box.className = 'result-box has-error'; return; }
+
+        box.innerHTML = `Command sent (id: ${cmdId}). Waiting for response... <span class="spinner"></span>`;
+
+        // Poll for result
+        for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            const check = await supa('GET', `/commands?id=eq.${cmdId}&select=status,result`);
+            if (check[0]?.status === 'completed') {
+                const res = check[0].result || '(no output)';
+
+                // Handle screenshot
+                if (res.startsWith('SCREENSHOT:')) {
+                    const parts = res.split('|');
+                    const dims = parts[0].replace('SCREENSHOT:', '');
+                    const b64 = parts.slice(1).join('|');
+                    box.textContent = `Screenshot received (${dims})`;
+                    box.className = 'result-box has-result';
+                    document.getElementById('screenshotArea').innerHTML =
+                        `<img class="screenshot-img" src="data:image/jpeg;base64,${b64}" alt="Screenshot" />`;
+                } else {
+                    box.textContent = res;
+                    box.className = 'result-box has-result';
+                }
+                return;
+            } else if (check[0]?.status === 'processing') {
+                box.innerHTML = `Processing on ${selectedPcId}... <span class="spinner"></span>`;
+            }
+        }
+        box.textContent = 'Timeout: No response after 60s. Is Bridge Agent running?';
+        box.className = 'result-box has-error';
+    } catch(e) {
+        box.textContent = 'Error: ' + e.message;
+        box.className = 'result-box has-error';
+    }
+}
+
+function sendCustomCmd() {
+    const action = document.getElementById('cmdAction').value;
+    const content = document.getElementById('cmdContent').value;
+    let target = null;
+
+    if (action === 'read_file' || action === 'list_dir' || action === 'start_app') {
+        target = content;
+        sendCmd(action, target, null);
+    } else {
+        sendCmd(action, null, content);
+    }
+}
+
+// Auto-refresh PC list every 30 seconds
+discoverPCs();
+setInterval(discoverPCs, 30000);
+</script>
+</body>
+</html>
