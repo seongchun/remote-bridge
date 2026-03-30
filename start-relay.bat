@@ -20,6 +20,15 @@ if not exist "%RELAY_DIR%" (
 
 cd /d "%RELAY_DIR%"
 
+:: Auto-open Bridge Dashboard in browser
+if exist "bridge-dashboard.html" (
+    echo [INFO] Bridge Dashboard 열기...
+    start "" "bridge-dashboard.html"
+) else (
+    echo [INFO] Dashboard not found locally. Opening from GitHub...
+    start "" "https://seongchun.github.io/remote-bridge/bridge-dashboard.html"
+)
+
 :: Check Node.js
 where node >nul 2>nul
 if errorlevel 1 (
