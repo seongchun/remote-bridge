@@ -1,6 +1,6 @@
 # Supabase Bridge Agent v4.0 - Multi-PC + RPA Edition
 # 회사 PC에서 실행. Supabase commands 테이블 폴링 + GUI 자동화 지원
-# 멀티PC 지원: pc_id 필드로 퉹정 PC만 명령 수신
+# 멀티PC 지원: pc_id 필드로 특정 PC만 명령 수신
 # PowerShell 5.1 호환
 
 param(
@@ -203,7 +203,7 @@ function Get-VisibleWindows {
         [Win32RPA]::GetWindowRect($hWnd, [ref]$rect) | Out-Null
         $w = $rect.Right - $rect.Left; $h = $rect.Bottom - $rect.Top
         if ($w -le 0 -or $h -le 0) { continue }
-      $pid = 0
+        $pid = 0
         [Win32RPA]::GetWindowThreadProcessId($hWnd, [ref]$pid) | Out-Null
         $windows += @{ handle = $hWnd.ToInt64(); title = $title; x = $rect.Left; y = $rect.Top; width = $w; height = $h; pid = $pid }
     }
@@ -304,77 +304,128 @@ function Execute-Command {
                 $result = Take-Screenshot -MaxWidth $maxW
                 if ($result.success) {
                     return "SCREENSHOT:$($result.thumbWidth)x$($result.thumbHeight)|$($result.base64)"
-  H�]\���T��Ԏ�	
-	�\�[�\��܊H��B�B�	��X���	\�[\�H	�۝[��۝�\����KR��ۂ�	��HY�
-	\�[\˘�]ۊH�	\�[\˘�]ۈH[�H��Y��B��X��P]V	\�[\˞VH	\�[\˞HP�]ۈ	����\�T�Y\SZ[\�X�ۙ����]\����X��Y]
-	
-	\�[\˞
-K	
-	\�[\˞JJH�]ۏI����B�	��X�W��X���	\�[\�H	�۝[��۝�\����KR��ۂ��X�P�X��P]V	\�[\˞VH	\�[\˞B��\�T�Y\SZ[\�X�ۙ�
-L��]\����X�KX�X��Y]
-	
-	\�[\˞
-K	
-	\�[\˞JJH��B�	�\W�^	���\�[K��[���ˑ�ܛ\˔�[��^\�N���[��Z]
-	�۝[�
-B��\�T�Y\SZ[\�X�ۙ����]\���\Y�	
-	�۝[���X���[���X]N��Z[�
-L	�۝[��[��
-JJH��B�	��^W��[�	���\�[K��[���ˑ�ܛ\˔�[��^\�N���[��Z]
-	�۝[�
-B��\�T�Y\SZ[\�X�ۙ����]\����^H�[��	�۝[���B�	�\���[�����	�[����H�]U�\�X�U�[���	[�\�H	�[�����ܑXX�Sؚ�X����
-	˜Y
-WH	
-	˝]JH	
-	˝�Y
-^	
-	˚ZY�
-H]
-	
-	˞
-K	
-	˞JJH�B��]\��
-	[�\�Z��[����B�B�	�X�]�]W��[�����]\��X�]�]KU�[��ОU]HU]T]\��	�۝[��B�	��\��\	�	�Z]]HH	�۝[���H�\�T���\��	\��]�Y�
-	�Z]]JH�܈
-	HH�	H[MN�	J��H�\�T�Y\T�X�ۙ�B�	�[��H�]U�\�X�U�[�����\�KSؚ�X��	˝]H[Z�H���Z]]J��B�Y�
-	�[�ː��[�Y�
-H	�H	�[���B��]\����\�Y�	\��]O��[��Έ	
-	˝]JH
-	
-	˝�Y
-^	
-	˚ZY�
-JH��B�B��]\����\�Y�	\��]�]�[���	��Z]]I�����[�Y�\�M\Ȃ�H[�H�\�T�Y\T�X�ۙ����]\����\�Y�	\��]��B�H�]��]\���T��Ԉ�\�[��	\��]�	Ȃ�B�B�	�\������:��z�gz�':�:���:�z�gH:�&;ff��]\���\�Έ	�Y
-	[�����TUT��SQJH��B�Y�][�]\���[�ۛ�ۈX�[ێ�	X�[ۈ��B�B�H�]��]\���T��Ԉ^X�][��	X�[ۈ�	Ȃ�B�B���OOOOOOOOOHXZ[���OOOOOOOOOB����Y�\�\�\��ۈ�\�\��Y�\�\�T�X\��X][Y\�H���[H
-	�ؘ[��[��[��H�H�X\��X]]�\�H
-��X�ۙ	X\��X][Y\��Y�
-	X\��X][Y\�Y�H
+                } else {
+                    return "ERROR: $($result.error)"
+                }
+            }
+            'click' {
+                $params = $content | ConvertFrom-Json
+                $btn = if ($params.button) { $params.button } else { "left" }
+                Click-At -X $params.x -Y $params.y -Button $btn
+                Start-Sleep -Milliseconds 300
+                return "Clicked at ($($params.x), $($params.y)) button=$btn"
+            }
+            'double_click' {
+                $params = $content | ConvertFrom-Json
+                DoubleClick-At -X $params.x -Y $params.y
+                Start-Sleep -Milliseconds 500
+                return "Double-clicked at ($($params.x), $($params.y))"
+            }
+            'type_text' {
+                [System.Windows.Forms.SendKeys]::SendWait($content)
+                Start-Sleep -Milliseconds 200
+                return "Typed: $($content.Substring(0, [Math]::Min(50, $content.Length)))"
+            }
+            'key_send' {
+                [System.Windows.Forms.SendKeys]::SendWait($content)
+                Start-Sleep -Milliseconds 200
+                return "Key sent: $content"
+            }
+            'list_windows' {
+                $windows = Get-VisibleWindows
+                $lines = $windows | ForEach-Object { "[$($_.pid)] $($_.title) | $($_.width)x$($_.height) at ($($_.x),$($_.y))" }
+                return ($lines -join "`n")
+            }
+            'activate_window' {
+                return Activate-WindowByTitle -TitlePattern $content
+            }
+            'start_app' {
+                $waitTitle = $content
+                try {
+                    Start-Process $target
+                    if ($waitTitle) {
+                        for ($i = 0; $i -lt 15; $i++) {
+                            Start-Sleep -Seconds 1
+                            $wins = Get-VisibleWindows | Where-Object { $_.title -like "*$waitTitle*" }
+                            if ($wins.Count -gt 0) {
+                                $w = $wins[0]
+                                return "Started: $target -> Window: $($w.title) ($($w.width)x$($w.height))"
+                            }
+                        }
+                        return "Started: $target but window '$waitTitle' not found after 15s"
+                    } else {
+                        Start-Sleep -Seconds 2
+                        return "Started: $target"
+                    }
+                } catch {
+                    return "ERROR starting $target : $_"
+                }
+            }
+            'list_pcs' {
+                # 등록된 모든 PC 목록 반환
+                return "This PC: $PcId ($env:COMPUTERNAME)"
+            }
+            default {
+                return "Unknown action: $action"
+            }
+        }
+    } catch {
+        return "ERROR executing $action : $_"
+    }
+}
 
-��	��X�JH\]KRX\��X]�	X\��X][Y\�H�B����]�[�[����[X[���܈\���� ;)�;(l:�m���Y:� ;'m�&`:�&z�l:�	�[	�'m:�l:�:�a;%�;'�:�:��{&��	�[\�H��]\�Y\K�[�[�ɛܙ\�XܙX]Y�]�\�ɛ[Z]MH��	�[\�
-�H��܏J��Y�\K��Y��Y�\K�[��Y�\˛�[
-H���	�Y�H�\HSY]�	��U	�T]����[X[����[\����Y�
-	�Y�X[�	�Yː��[�Y�
-H�ܙXX�
-	�Y[�	�Y�H	�H�]Q]HQ�ܛX]	��[N���	�]�Y]�HY�
-	�Y�\��]
-H�	�Y�\��]H[�ZY�
-	�Y��۝[�
-H�	�Y��۝[�H[�H���B�	�]�Y]�H	�]�Y]˔�X���[���X]N��Z[�
-	�]�Y]˓[��
-JB�ܚ]KR�����H^X�][�Έ	
-	�Y�X�[ۊH	�]�Y]ȈQ�ܙYܛ�[���܈ܙY[����X\��\����\��[���\��
-�Z[HH��[X[�
-B�	�Z[P��HH��]\�H����\��[�Ȏ����\��Y؞HH	�YH�۝�\��R��ۈP��\�\��\HSY]�	�U�	�T]����[X[���YY\K�
-	�Y�Y
-I��]\�Y\K�[�[�ȈP��H	�Z[P��H�]S�[��	�\�[H^X�]KP��[X[�P�Y	�Y���\]H��[X[��]�\�[�	��HH�]\�H���\]Y���\�[HY�
-	�\�[
-H�	�\�[��X���[���X]N��Z[�
-�	�\�[�[��
-JHH[�H�����]]
-H�B����\��Y؞HH	�Y�H�۝�\��R��ۈP��\�\�	��U]�H��\�[K�^�[���[��N��U���]��[����\�[K�^�[���[��N��U���]�]\�	��JJB��\HSY]�	�U�	�T]����[X[���YY\K�
-	�Y�Y
-H�P��H	��U]���ܚ]KR�����HۙN�	
-	�Y�X�[ۊHO�	
-	�\�[��X���[���X]N��Z[�	�\�[�[��
-JJH�Q�ܙYܛ�[���܈ܘ^B�B�B�H�]�ܚ]KR����T��ԗH����	ȈQ�ܙYܛ�[���܈�Y��\�T�Y\T�X�ۙ�
-B�B���\�T�Y\T�X�ۙ�	��XB
+# ========== Main Loop ==========
+
+# Register this PC on startup
+Register-PC
+
+$heartbeatTimer = 0
+
+while ($global:Running) {
+    try {
+        # Heartbeat every 60 seconds
+        $heartbeatTimer++
+        if ($heartbeatTimer -ge (60 / $PollSec)) {
+            Update-Heartbeat
+            $heartbeatTimer = 0
+        }
+
+        # Fetch pending commands for this PC
+        # 3가지 조건: pc_id가 이 PC와 같거나, 'all'이거나, 비어있는 경우
+        $filter = "status=eq.pending&order=created_at.asc&limit=5"
+        $filter += "&or=(pc_id.eq.$PcId,pc_id.eq.all,pc_id.is.null)"
+
+        $cmds = Supa -Method 'GET' -Path "/commands?$filter"
+
+        if ($cmds -and $cmds.Count -gt 0) {
+            foreach ($cmd in $cmds) {
+                $ts = Get-Date -Format 'HH:mm:ss'
+                $preview = if ($cmd.target) { $cmd.target } elseif ($cmd.content) { $cmd.content } else { "" }
+                $preview = $preview.Substring(0, [Math]::Min(40, $preview.Length))
+                Write-Host "[$ts] Executing: $($cmd.action) $preview" -ForegroundColor Green
+
+                # Mark as processing first (claim the command)
+                $claimBody = @{ status = "processing"; processed_by = $PcId } | ConvertTo-Json -Compress
+                Supa -Method 'PATCH' -Path "/commands?id=eq.$($cmd.id)&status=eq.pending" -Body $claimBody | Out-Null
+
+                $result = Execute-Command -Cmd $cmd
+
+                # Update command with result
+                $body = @{
+                    status       = "completed"
+                    result       = if ($result) { $result.Substring(0, [Math]::Min(60000, $result.Length)) } else { "(no output)" }
+                    processed_by = $PcId
+                } | ConvertTo-Json -Compress
+                $bodyUtf8 = [System.Text.Encoding]::UTF8.GetString([System.Text.Encoding]::UTF8.GetBytes($body))
+                Supa -Method 'PATCH' -Path "/commands?id=eq.$($cmd.id)" -Body $bodyUtf8
+
+                Write-Host "[$ts] Done: $($cmd.action) -> $($result.Substring(0, [Math]::Min(80, $result.Length)))" -ForegroundColor Gray
+            }
+        }
+    } catch {
+        Write-Host "[ERROR] Poll loop: $_" -ForegroundColor Red
+        Start-Sleep -Seconds 5
+    }
+
+    Start-Sleep -Seconds $PollSec
+}
