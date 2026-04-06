@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cowork Remote</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+/* ═══════════════════════════════════════
+   CSS: Dark Theme, Modern Layout
+   ═══════════════════════════════════════ */
+:root {
+  --bg0: #0d1117; --bg1: #161b22; --bg2: #21262d; --bg3: #30363d;
+  --text1: #f0f6fc; --text2: #c9d1d9; --text3: #8b949e;
+  --accent: #58a6ff; --accent2: #388bfd;
+  --green: #3fb950; --red: #f85149; --orange: #d29922; --purple: #bc8cff;
+  --border: #30363d; --radius: 10px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg0); color: var(--text2); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+a { color: var(--accent); text-decoration: none; }
+
+/* TOP BAR */
+.topbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--bg1); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10; }
+.topbar .logo { font-size: 16px; font-weight: 700; color: var(--text1); white-space: nowrap; }
+.topbar .logo span { color: var(--accent); }
+.status-pills { display: flex; gap: 8px; margin-left: auto; }
+.pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; background: var(--bg2); border: 1px solid var(--border); color: var(--text3); }
+.pill .dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.pill .dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.pill .dot.off { background: var(--red); }
+.pill .dot.wait { background: var(--orange); animation: pulse 1.5s infinite; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* MAIN LAYOUT */
+.main { display: flex; flex: 1; overflow: hidden; }
+
+/* SIDEBAR */
+.sidebar { width: 260px; background: var(--bg1); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+.sidebar-header { padding: 12px; display: flex; gap: 8px; }
+.sidebar-header button { flex: 1; padding: 8px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-size: 12px; cursor: pointer; transition: all .15s; }
+.sidebar-header button:hover { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+.sidebar-header button.active { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+.chat-list { flex: 1; overflow-y: auto; padding: 4px 8px; }
+.chat-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text3); display: flex; align-items: center; gap: 8px; margin-bottom: 2px; }
+.chat-item:hover { background: var(--bg2); }
+.chat-item.active { background: var(--bg2); color: var(--text1); }
+.chat-item .icon { font-size: 14px; }
+.new-chat-btn { margin: 8px 12px; padding: 10px; border-radius: var(--radius); border: 1px dashed var(--border); background: transparent; color: var(--text3); font-size: 13px; cursor: pointer; text-align: center; }
+.new-chat-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* CONTENT AREA */
+.content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* CHAT VIEW */
+.messages { flex: 1; overflow-y: auto; padding: 16px; }
+.msg { max-width: 75%; margin-bottom: 12px; padding: 10px 14px; border-radius: 12px; font-size: 14px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
+.msg.user { background: var(--accent2); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
+.msg.assistant { background: var(--bg2); color: var(--text2); border-bottom-left-radius: 4px; }
+.msg.assistant .thinking { color: var(--text3); font-style: italic; font-size: 12px; margin-bottom: 4px; }
+.msg.system { background: transparent; color: var(--text3); font-size: 12px; text-align: center; max-width: 100%; }
+.msg .time { font-size: 10px; color: var(--text3); margin-top: 4px; text-align: right; }
+.msg.assistant .time { text-align: left; }
+.typing-indicator { padding: 8px 16px; color: var(--text3); font-size: 12px; display: none; }
+.typing-indicator.show { display: block; }
+
+/* INPUT AREA */
+.input-area { padding: 12px 16px; border-top: 1px solid var(--border); background: var(--bg1); }
+.input-row { display: flex; gap: 8px; align-items: flex-end; }
+.input-row textarea { flex: 1; resize: none; padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text1); font-size: 14px; font-family: inherit; line-height: 1.5; min-height: 42px; max-height: 160px; outline: none; }
+.input-row textarea:focus { border-color: var(--accent); }
+.input-row textarea::placeholder { color: var(--text3); }
+.send-btn { padding: 10px 18px; border-radius: var(--radius); border: none; background: var(--accent2); color: #fff; font-size: 14px; cursor: pointer; white-space: nowrap; height: 42px; }
+.send-btn:hover { background: var(--accent); }
+.send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* BRIDGE PANEL */
+.bridge-panel { flex: 1; overflow-y: auto; padding: 20px; }
+.bridge-section { margin-bottom: 24px; }
+.bridge-section h3 { font-size: 14px; color: var(--text1); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+.bridge-section h3 .badge { font-size: 10px; padding: 2px 8px; border-radius: 10px; background: var(--bg3); color: var(--text3); font-weight: 400; }
+.cmd-input { width: 100%; padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text1); font-size: 13px; font-family: 'Consolas', 'Courier New', monospace; outline: none; }
+.cmd-input:focus { border-color: var(--accent); }
+.cmd-row { display: flex; gap: 8px; margin-bottom: 8px; }
+.cmd-row .cmd-input { flex: 1; }
+.cmd-btn { padding: 8px 16px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.cmd-btn:hover { background: var(--accent2); color: #fff; border-color: var(--accent2); }
+.cmd-btn.danger { border-color: var(--red); color: var(--red); }
+.cmd-btn.danger:hover { background: var(--red); color: #fff; }
+.result-box { margin-top: 8px; padding: 10px; border-radius: var(--radius); background: var(--bg0); border: 1px solid var(--border); font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; color: var(--text2); white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+.result-box.error { border-color: var(--red); color: var(--red); }
+.result-box.success { border-color: var(--green); }
+
+/* FILE WRITE SECTION */
+.file-write-area { display: flex; flex-direction: column; gap: 8px; }
+.file-write-area textarea { width: 100%; min-height: 120px; padding: 10px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text1); font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; resize: vertical; outline: none; }
+.file-write-area textarea:focus { border-color: var(--accent); }
+
+/* COMMAND LOG */
+.cmd-log { margin-top: 16px; }
+.cmd-log-item { padding: 8px 10px; border-radius: 6px; background: var(--bg2); margin-bottom: 4px; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+.cmd-log-item .cmd-status { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.cmd-log-item .cmd-status.pending { background: var(--orange); }
+.cmd-log-item .cmd-status.completed { background: var(--green); }
+.cmd-log-item .cmd-status.error { background: var(--red); }
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* RESPONSIVE */
+@media (max-width: 700px) {
+  .sidebar { width: 200px; }
+  .msg { max-width: 90%; }
+}
+</style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="logo">Cowork <span>Remote</span></div>
+  <div class="status-pills">
+    <div class="pill" id="pillRelay"><span class="dot wait" id="dotRelay"></span><span id="lblRelay">릴레이 확인 중...</span></div>
+    <div class="pill" id="pillBridge"><span class="dot wait" id="dotBridge"></span><span id="lblBridge">브릿지 확인 중...</span></div>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="main">
+  <!-- SIDEBAR -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <button id="tabChat" class="active" onclick="switchTab('chat')">💬 채팅</button>
+      <button id="tabBridge" onclick="switchTab('bridge')">🖥️ 원격</button>
+    </div>
+    <div id="sideChat" class="chat-list"></div>
+    <button class="new-chat-btn" id="newChatBtn" onclick="createNewChat()">+ 새 대화</button>
+  </div>
+
+  <!-- CONTENT -->
+  <div class="content">
+    <!-- CHAT VIEW -->
+    <div id="viewChat" style="display:flex;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="messages" id="messagesContainer"></div>
+      <div class="typing-indicator" id="typingIndicator">🤖 Claude가 응답 중...</div>
+      <div class="input-area">
+        <div class="input-row">
+          <textarea id="msgInput" placeholder="메시지를 입력하세요..." rows="1"></textarea>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">전송</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BRIDGE VIEW -->
+    <div id="viewBridge" class="bridge-panel" style="display:none;">
+      <!-- PowerShell 실행 -->
+      <div class="bridge-section">
+        <h3>⚡ PowerShell 명령 실행 <span class="badge">회사 PC</span></h3>
+        <div class="cmd-row">
+          <input class="cmd-input" id="psInput" placeholder='예: Get-ChildItem C:\Users\winspring\Desktop' onkeydown="if(event.key==='Enter')runPS()">
+          <button class="cmd-btn" onclick="runPS()">실행</button>
+        </div>
+        <div class="result-box" id="psResult" style="display:none;"></div>
+      </div>
+
+      <!-- 파일 쓰기 -->
+      <div class="bridge-section">
+        <h3>📝 파일 쓰기 <span class="badge">회사 PC</span></h3>
+        <div class="file-write-area">
+          <input class="cmd-input" id="filePathInput" placeholder="파일 경로 (예: C:\Users\winspring\Desktop\test.txt)">
+          <textarea id="fileContentInput" placeholder="파일 내용을 입력하세요..."></textarea>
+          <button class="cmd-btn" onclick="writeFile()">파일 저장</button>
+        </div>
+        <div class="result-box" id="fileResult" style="display:none;"></div>
+      </div>
+
+      <!-- 디렉토리 탐색 -->
+      <div class="bridge-section">
+        <h3>📁 디렉토리 탐색 <span class="badge">회사 PC</span></h3>
+        <div class="cmd-row">
+          <input class="cmd-input" id="dirInput" value="C:\Users\winspring\Desktop" onkeydown="if(event.key==='Enter')listDir()">
+          <button class="cmd-btn" onclick="listDir()">탐색</button>
+        </div>
+        <div class="result-box" id="dirResult" style="display:none;"></div>
+      </div>
+
+      <!-- 명령 로그 -->
+      <div class="bridge-section">
+        <h3>📋 최근 명령 로그</h3>
+        <div class="cmd-log" id="cmdLog"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════
+   CONFIG
+   ═══════════════════════════════════════ */
+const SUPA_URL = 'https://rnnigyfzwlgojxyccgsm.supabase.co';
+const SUPA_KEY = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+/* ═══════════════════════════════════════
+   STATE
+   ═══════════════════════════════════════ */
+let currentTab = 'chat';      // 'chat' | 'bridge'
+let currentChatId = null;
+let chats = [];
+let relayOnline = false;
+let bridgeOnline = false;
+let waitingResponse = false;   // 응답 대기 중 여부
+let pollTimer = null;
+let realtimeChannel = null;
+
+/* ═══════════════════════════════════════
+   SUPABASE HELPERS
+   ═══════════════════════════════════════ */
+async function supaGet(table, query) {
+  const url = `${SUPA_URL}/rest/v1/${table}?${query}`;
+  const r = await fetch(url, {
+    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+  });
+  if (!r.ok) throw new Error(`GET ${table}: ${r.status}`);
+  return r.json();
+}
+
+async function supaPost(table, data) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
+    method: 'POST',
+    headers: {
+      'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}`,
+      'Content-Type': 'application/json', 'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(data)
+  });
+  if (!r.ok) throw new Error(`POST ${table}: ${r.status}`);
+  return r.json();
+}
+
+async function supaPatch(table, query, data) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}`,
+      'Content-Type': 'application/json', 'Prefer': 'return=representation'
+    },
+    body: JSON.stringify(data)
+  });
+  if (!r.ok) throw new Error(`PATCH ${table}: ${r.status}`);
+  return r.json();
+}
+
+/* ═══════════════════════════════════════
+   HEARTBEAT: 릴레이 & 브릿지 상태 체크
+   ═══════════════════════════════════════ */
+async function checkRelayHeartbeat() {
+  try {
+    const rows = await supaGet('commands', 'id=eq.relay-heartbeat&select=result,content');
+    if (rows.length > 0 && rows[0].result) {
+      const lastBeat = new Date(rows[0].result);
+      const agoSec = Math.floor((Date.now() - lastBeat.getTime()) / 1000);
+      if (agoSec < 90) {
+        relayOnline = true;
+        const status = rows[0].content === 'busy' ? '처리 중' : '대기 중';
+        setRelayStatus('on', `릴레이 연결됨 (${status})`);
+      } else {
+        relayOnline = false;
+        const min = Math.floor(agoSec / 60);
+        setRelayStatus('off', min > 0 ? `오프라인 (${min}분 전)` : `오프라인 (${agoSec}초 전)`);
+      }
+    } else {
+      relayOnline = false;
+      setRelayStatus('off', '릴레이 미연결');
+    }
+  } catch (e) {
+    setRelayStatus('off', '체크 실패');
+  }
+}
+
+async function checkBridgeHeartbeat() {
+  try {
+    // 브릿지 에이전트 ping: 명령을 보내고 응답 확인
+    const rows = await supaGet('commands', 'id=eq.bridge-heartbeat&select=result,status');
+    if (rows.length > 0 && rows[0].result) {
+      const lastBeat = new Date(rows[0].result);
+      const agoSec = Math.floor((Date.now() - lastBeat.getTime()) / 1000);
+      if (agoSec < 120) {
+        bridgeOnline = true;
+        setBridgeStatus('on', '브릿지 연결됨');
+      } else {
+        bridgeOnline = false;
+        setBridgeStatus('off', '브릿지 오프라인');
+      }
+    } else {
+      // heartbeat 레코드가 없으면 ping 보내기
+      bridgeOnline = false;
+      setBridgeStatus('wait', '브릿지 확인 중...');
+      sendBridgePing();
+    }
+  } catch (e) {
+    setBridgeStatus('off', '체크 실패');
+  }
+}
+
+async function sendBridgePing() {
+  try {
+    // 기존 bridge-heartbeat가 있으면 패치, 없으면 생성
+    await supaPost('commands', {
+      id: 'bridge-ping-' + Date.now(),
+      action: 'run_ps',
+      target: 'local',
+      content: '$ts=(Get-Date).ToUniversalTime().ToString("o"); $body=@{result=$ts;status="completed"}|ConvertTo-Json; Invoke-RestMethod -Uri "' + SUPA_URL + '/rest/v1/commands?id=eq.bridge-heartbeat" -Method PATCH -Headers @{apikey="' + SUPA_KEY + '";Authorization="Bearer ' + SUPA_KEY + '";"Content-Type"="application/json";"Prefer"="return=representation"} -Body $body; if(-not $?) { Invoke-RestMethod -Uri "' + SUPA_URL + '/rest/v1/commands" -Method POST -Headers @{apikey="' + SUPA_KEY + '";Authorization="Bearer ' + SUPA_KEY + '";"Content-Type"="application/json"} -Body (@{id="bridge-heartbeat";action="heartbeat";target="bridge";content="Bridge Agent active";status="completed";result=$ts}|ConvertTo-Json) }',
+      status: 'pending'
+    });
+  } catch (e) { /* 무시 */ }
+}
+
+function setRelayStatus(state, text) {
+  const dot = document.getElementById('dotRelay');
+  const lbl = document.getElementById('lblRelay');
+  dot.className = 'dot ' + state;
+  lbl.textContent = text;
+}
+
+function setBridgeStatus(state, text) {
+  const dot = document.getElementById('dotBridge');
+  const lbl = document.getElementById('lblBridge');
+  dot.className = 'dot ' + state;
+  lbl.textContent = text;
+}
+
+/* ═══════════════════════════════════════
+   TAB SWITCHING
+   ═══════════════════════════════════════ */
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tabChat').classList.toggle('active', tab === 'chat');
+  document.getElementById('tabBridge').classList.toggle('active', tab === 'bridge');
+  document.getElementById('viewChat').style.display = tab === 'chat' ? 'flex' : 'none';
+  document.getElementById('viewBridge').style.display = tab === 'bridge' ? 'block' : 'none';
+  document.getElementById('sideChat').style.display = tab === 'chat' ? 'block' : 'none';
+  document.getElementById('newChatBtn').style.display = tab === 'chat' ? 'block' : 'none';
+}
+
+/* ═══════════════════════════════════════
+   CHAT LIST MANAGEMENT
+   ═══════════════════════════════════════ */
+async function loadChats() {
+  try {
+    // messages 테이블에서 고유 chat_id 목록 조회
+    const rows = await supaGet('messages', 'select=chat_id&order=created_at.desc');
+    const seen = new Set();
+    chats = [];
+    for (const r of rows) {
+      if (!r.chat_id || seen.has(r.chat_id)) continue;
+      if (r.chat_id.startsWith('setup-') || r.chat_id.startsWith('sim-') || r.chat_id.startsWith('selftest')) continue;
+      seen.add(r.chat_id);
+      chats.push(r.chat_id);
+    }
+    renderChatList();
+    if (!currentChatId && chats.length > 0) {
+      selectChat(chats[0]);
+    } else if (currentChatId) {
+      selectChat(currentChatId);
+    }
+  } catch (e) {
+    console.error('loadChats error:', e);
+  }
+}
+
+function renderChatList() {
+  const el = document.getElementById('sideChat');
+  el.innerHTML = chats.map(id => `
+    <div class="chat-item ${id === currentChatId ? 'active' : ''}" onclick="selectChat('${id}')">
+      <span class="icon">💬</span>
+      <span>${formatChatName(id)}</span>
+    </div>
+  `).join('');
+}
+
+function formatChatName(id) {
+  if (!id) return '(무제)';
+  // 긴 ID는 축약
+  if (id.length > 20) return id.slice(0, 8) + '...' + id.slice(-6);
+  return id;
+}
+
+async function createNewChat() {
+  const id = 'chat-' + Math.random().toString(36).slice(2, 10);
+  chats.unshift(id);
+  renderChatList();
+  selectChat(id);
+}
+
+async function selectChat(chatId) {
+  currentChatId = chatId;
+  renderChatList();
+  await loadMessages(chatId);
+  startPolling();
+  setupRealtime();
+}
+
+/* ═══════════════════════════════════════
+   MESSAGES
+   ═══════════════════════════════════════ */
+async function loadMessages(chatId) {
+  const container = document.getElementById('messagesContainer');
+  container.innerHTML = '<div class="msg system">메시지 로딩 중...</div>';
+  try {
+    const msgs = await supaGet('messages',
+      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at`);
+    container.innerHTML = '';
+    for (const m of msgs) {
+      appendMessage(m);
+    }
+    scrollBottom();
+
+    // 마지막 메시지가 user이고 status=pending이면 응답 대기 중
+    const last = msgs[msgs.length - 1];
+    if (last && last.role === 'user' && (last.status === 'pending' || last.status === 'sent')) {
+      setWaiting(true);
+    } else {
+      setWaiting(false);
+    }
+  } catch (e) {
+    container.innerHTML = `<div class="msg system">메시지 로드 실패: ${e.message}</div>`;
+  }
+}
+
+function appendMessage(msg) {
+  const container = document.getElementById('messagesContainer');
+  // 이미 존재하메 업데이트
+  let el = document.getElementById('msg-' + msg.id);
+  if (el) {
+    el.querySelector('.msg-content').textContent = msg.content || '';
+    return;
+  }
+  el = document.createElement('div');
+  el.id = 'msg-' + msg.id;
+  el.className = `msg ${msg.role || 'system'}`;
+  const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+  el.innerHTML = `<div class="msg-content">${escapeHtml(msg.content || '')}</div><div class="time">${time}</div>`;
+  container.appendChild(el);
+}
+
+function scrollBottom() {
+  const c = document.getElementById('messagesContainer');
+  c.scrollTop = c.scrollHeight;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/* ═══════════════════════════════════════
+   SEND MESSAGE
+   ═══════════════════════════════════════ */
+async function sendMessage() {
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !currentChatId) return;
+
+  if (!relayOnline) {
+    alert('릴레이가 오프라인입니다. 집 PC에서 relay-worker.js를 실행해주세요.');
+    return;
+  }
+
+  input.value = '';
+  autoResizeInput();
+
+  const msgId = 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+
+  // UI에 즉시 표시
+  appendMessage({ id: msgId, role: 'user', content: text, created_at: new Date().toISOString() });
+  scrollBottom();
+  setWaiting(true);
+
+  try {
+    await supaPost('messages', {
+      id: msgId,
+      chat_id: currentChatId,
+      role: 'user',
+      content: text,
+      status: 'pending'
+    });
+    // 폴링 빠르게
+    startPolling(2000);
+  } catch (e) {
+    appendMessage({ id: 'err-' + Date.now(), role: 'system', content: '전송 실패: ' + e.message });
+    setWaiting(false);
+  }
+}
+
+function setWaiting(on) {
+  waitingResponse = on;
+  document.getElementById('typingIndicator').classList.toggle('show', on);
+  document.getElementById('sendBtn').disabled = on;
+}
+
+/* ═══════════════════════════════════════
+   POLLING: 새 메시지 체크
+   ═══════════════════════════════════════ */
+function startPolling(interval = 5000) {
+  stopPolling();
+  pollMessages();
+  pollTimer = setInterval(pollMessages, interval);
+}
+
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+async function pollMessages() {
+  if (!currentChatId) return;
+  try {
+    const msgs = await supaGet('messages',
+      `chat_id=eq.${currentChatId}&order=created_at.asc&select=id,role,content,status,created_at`);
+
+    const container = document.getElementById('messagesContainer');
+    let hasNewAssistant = false;
+
+    for (const m of msgs) {
+      const existing = document.getElementById('msg-' + m.id);
+      if (existing) {
+        // 콜텐츠 업데이트 (스트리밍)
+        const contentEl = existing.querySelector('.msg-content');
+        if (contentEl && contentEl.textContent !== (m.content || '')) {
+          contentEl.textContent = m.content || '';
+          scrollBottom();
+        }
+      } else {
+        appendMessage(m);
+        if (m.role === 'assistant') hasNewAssistant = true;
+      }
+    }
+
+    if (hasNewAssistant) {
+      scrollBottom();
+      // 마지막 assistant 메시지 status 확인
+      const lastAssistant = [...msgs].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant && (lastAssistant.status === 'completed' || lastAssistant.status === 'error')) {
+        setWaiting(false);
+        startPolling(5000); // 느린 폴링으로 전혘
+      }
+    }
+  } catch (e) {
+    console.error('pollMessages error:', e);
+  }
+}
+
+/* ═══════════════════════════════════════
+   REALTIME SUBSCRIPTION
+   ═══════════════════════════════════════ */
+function setupRealtime() {
+  if (realtimeChannel) {
+    sb.removeChannel(realtimeChannel);
+  }
+  if (!currentChatId) return;
+
+  realtimeChannel = sb
+    .channel('messages-' + currentChatId)
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'messages',
+      filter: `chat_id=eq.${currentChatId}`
+    }, (payload) => {
+      const m = payload.new;
+      if (!m) return;
+      const existing = document.getElementById('msg-' + m.id);
+      if (existing) {
+        const contentEl = existing.querySelector('.msg-content');
+        if (contentEl) contentEl.textContent = m.content || '';
+      } else {
+        appendMessage(m);
+      }
+      scrollBottom();
+      if (m.role === 'assistant' && (m.status === 'completed' || m.status === 'error')) {
+        setWaiting(false);
+      }
+    })
+    .subscribe();
+}
+
+/* ═══════════════════════════════════════
+   BRIDGE COMMANDS
+   ═══════════════════════════════════════ */
+async function execBridgeCommand(action, content, resultBoxId) {
+  const box = document.getElementById(resultBoxId);
+  box.style.display = 'block';
+  box.className = 'result-box';
+  box.textContent = '실행 중...';
+
+  const cmdId = 'cmd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+  try {
+    await supaPost('commands', {
+      id: cmdId,
+      action: action,
+      target: 'local',
+      content: content,
+      status: 'pending'
+    });
+
+    addCmdLog(cmdId, action, 'pending');
+
+    // 결과 대기 (최대 30초)
+    for (let i = 0; i < 30; i++) {
+      await sleep(1000);
+      const rows = await supaGet('commands', `id=eq.${cmdId}&select=status,result`);
+      if (rows.length > 0) {
+        const r = rows[0];
+        if (r.status === 'completed') {
+          box.textContent = r.result || '(완료, 출력 없음)';
+          box.className = 'result-box success';
+          updateCmdLog(cmdId, 'completed');
+          return r.result;
+        } else if (r.status === 'error') {
+          box.textContent = '오류: ' + (r.result || '알 수 없는 오류');
+          box.className = 'result-box error';
+          updateCmdLog(cmdId, 'error');
+          return null;
+        }
+      }
+    }
+    box.textContent = '타임아웃: 브릿지 에이전트가 응닕하지 않습니다.';
+    box.className = 'result-box error';
+    updateCmdLog(cmdId, 'error');
+  } catch (e) {
+    box.textContent = '실행 오류: ' + e.message;
+    box.className = 'result-box error';
+  }
+}
+
+function runPS() {
+  const cmd = document.getElementById('psInput').value.trim();
+  if (!cmd) return;
+  execBridgeCommand('run_ps', cmd, 'psResult');
+}
+
+function writeFile() {
+  const path = document.getElementById('filePathInput').value.trim();
+  const content = document.getElementById('fileContentInput').value;
+  if (!path) { alert('파일 경로를 입력하세요.'); return; }
+  execBridgeCommand('write_file', JSON.stringify({ path, content }), 'fileResult');
+}
+
+function listDir() {
+  const dir = document.getElementById('dirInput').value.trim();
+  if (!dir) return;
+  const ps = `Get-ChildItem '${dir}' | Format-Table Name, Length, LastWriteTime -AutoSize | Out-String`;
+  execBridgeCommand('run_ps', ps, 'dirResult');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+/* COMMAND LOG */
+function addCmdLog(id, action, status) {
+  const log = document.getElementById('cmdLog');
+  const time = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const el = document.createElement('div');
+  el.className = 'cmd-log-item';
+  el.id = 'log-' + id;
+  el.innerHTML = `<span class="cmd-status ${status}"></span><span>${time} | ${action}</span>`;
+  log.prepend(el);
+  // 최대 20개
+  while (log.children.length > 20) log.removeChild(log.lastChild);
+}
+
+function updateCmdLog(id, status) {
+  const el = document.getElementById('log-' + id);
+  if (el) {
+    const dot = el.querySelector('.cmd-status');
+    if (dot) dot.className = 'cmd-status ' + status;
+  }
+}
+
+/* ═══════════════════════════════════════
+   INPUT HANDLING (Korean IME fix)
+   ═══════════════════════════════════════ */
+function setupInput() {
+  const input = document.getElementById('msgInput');
+
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      // ★ 핵심: preventDefault를 isComposing 체큀보다 먼저!
+      e.preventDefault();
+      if (e.isComposing) return;
+      sendMessage();
+    }
+  });
+
+  input.addEventListener('input', autoResizeInput);
+}
+
+function autoResizeInput() {
+  const input = document.getElementById('msgInput');
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+}
+
+/* ═══════════════════════════════════════
+   INIT
+   ═══════════════════════════════════════ */
+document.addEventListener('DOMContentLoaded', async () => {
+  setupInput();
+  switchTab('chat');
+
+  // 즉시 상태 확인
+  await Promise.all([checkRelayHeartbeat(), checkBridgeHeartbeat()]);
+
+  // 채팅 로드
+  await loadChats();
+
+  // 주기적 상태 체크
+  setInterval(checkRelayHeartbeat, 15000);
+  setInterval(checkBridgeHeartbeat, 30000);
+});
+</script>
+</body>
+</html>
