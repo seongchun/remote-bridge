@@ -7,601 +7,1118 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root {
-  --bg0: #0d1117; --bg1: #161b22; --bg2: #21262d; --bg3: #30363d;
-  --text1: #f0f6fc; --text2: #c9d1d9; --text3: #8b949e;
-  --accent: #58a6ff; --accent2: #388bfd;
-  --green: #3fb950; --red: #f85149; --orange: #d29922; --purple: #bc8cff;
-  --border: #30363d; --radius: 8px;
+  --bg0: #1a1a1a;
+  --bg1: #222222;
+  --bg2: #2a2a2a;
+  --bg3: #333333;
+  --bg4: #3d3d3d;
+  --text1: #f0f0ef;
+  --text2: #b0afa8;
+  --text3: #6b6b6b;
+  --accent: #d97706;
+  --accent2: #b45309;
+  --blue: #2563eb;
+  --blue2: #1d4ed8;
+  --green: #22c55e;
+  --red: #ef4444;
+  --orange: #f59e0b;
+  --border: #2d2d2d;
+  --radius: 12px;
+  --radius-sm: 8px;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, 'Segoe UI', sans-serif; background: var(--bg0); color: var(--text2); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+html, body { height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+  background: var(--bg0);
+  color: var(--text1);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.5;
+}
 
-/* TOP BAR */
-.topbar { display: flex; align-items: center; gap: 12px; padding: 8px 16px; background: var(--bg1); border-bottom: 1px solid var(--border); flex-shrink: 0; z-index: 10; }
-.logo { font-size: 15px; font-weight: 700; color: var(--text1); }
-.logo span { color: var(--accent); }
-.status-pills { display: flex; gap: 8px; margin-left: auto; }
-.pill { display: flex; align-items: center; gap: 5px; padding: 3px 10px; border-radius: 20px; font-size: 11px; background: var(--bg2); border: 1px solid var(--border); color: var(--text3); }
-.dot { width: 6px; height: 6px; border-radius: 50%; }
-.dot.on { background: var(--green); box-shadow: 0 0 5px var(--green); }
+/* ── TOPBAR ── */
+.topbar {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  z-index: 10;
+}
+.logo {
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text1);
+  user-select: none;
+}
+.logo em { color: var(--accent); font-style: normal; }
+.spacer { flex: 1; }
+.status-pills { display: flex; gap: 6px; }
+.pill {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  color: var(--text3);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); }
+.dot.on  { background: var(--green); box-shadow: 0 0 5px var(--green); }
 .dot.off { background: var(--red); }
-.dot.wait { background: var(--orange); animation: pulse 1.5s infinite; }
-@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.4; } }
+.dot.wait { background: var(--orange); animation: blink 1.5s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-/* 3-PANEL LAYOUT */
+/* ── MAIN ── */
 .panels { display: flex; flex: 1; overflow: hidden; }
 
-/* FILE EXPLORER (left) */
-.file-panel { width: 240px; background: var(--bg1); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
-.file-panel-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
-.file-panel-header .title { font-size: 12px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
-.path-bar { display: flex; align-items: center; gap: 4px; padding: 6px 12px; border-bottom: 1px solid var(--border); background: var(--bg2); }
-.path-bar input { flex: 1; background: transparent; border: none; color: var(--text1); font-size: 12px; font-family: 'Consolas', monospace; outline: none; }
-.path-bar button { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 14px; padding: 2px; }
-.file-tree { flex: 1; overflow-y: auto; padding: 4px 0; }
-.tree-item { display: flex; align-items: center; gap: 6px; padding: 5px 12px; cursor: pointer; font-size: 13px; color: var(--text2); user-select: none; }
-.tree-item:hover { background: var(--bg2); }
-.tree-item.active { background: var(--bg2); color: var(--accent); }
-.tree-item .icon { font-size: 14px; width: 18px; text-align: center; flex-shrink: 0; }
-.tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tree-item .size { margin-left: auto; font-size: 11px; color: var(--text3); flex-shrink: 0; }
-.tree-loading { padding: 12px; text-align: center; color: var(--text3); font-size: 12px; }
+/* ── FILE PANEL ── */
+.file-panel {
+  width: 220px;
+  background: var(--bg1);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.panel-hdr {
+  padding: 8px 10px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .6px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 5px;
+}
+.panel-hdr .hdr-btns { margin-left: auto; display: flex; gap: 2px; }
+.panel-hdr .hdr-btns button {
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; padding: 2px 4px; font-size: 12px;
+  border-radius: 4px; line-height: 1;
+}
+.panel-hdr .hdr-btns button:hover { background: var(--bg3); color: var(--text1); }
+.path-bar {
+  padding: 5px 8px;
+  background: var(--bg2);
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 3px;
+}
+.path-bar input {
+  flex: 1; background: transparent; border: none;
+  color: var(--text2); font-size: 11px;
+  font-family: 'SF Mono', 'Consolas', monospace; outline: none;
+}
+.path-bar button {
+  background: none; border: none; color: var(--accent);
+  cursor: pointer; font-size: 12px; padding: 2px; line-height: 1;
+}
+.file-tree { flex: 1; overflow-y: auto; padding: 3px 0; }
+.tree-item {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 10px; cursor: pointer; font-size: 12.5px;
+  color: var(--text2); user-select: none;
+}
+.tree-item:hover { background: var(--bg2); color: var(--text1); }
+.tree-item.active { background: rgba(217,119,6,.15); color: var(--accent); }
+.tree-item .icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
+.tree-item .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.tree-item .fsize { font-size: 10px; color: var(--text3); flex-shrink: 0; }
+.tree-item .app-badge {
+  font-size: 9px; padding: 1px 4px; border-radius: 4px;
+  background: rgba(217,119,6,.2); color: var(--accent); flex-shrink: 0;
+}
+.tree-msg { padding: 14px 10px; text-align: center; color: var(--text3); font-size: 12px; }
 
-/* EDITOR (center) */
-.editor-panel { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); min-width: 0; }
-.editor-tabs { display: flex; background: var(--bg1); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
-.editor-tab { display: flex; align-items: center; gap: 6px; padding: 8px 14px; font-size: 12px; color: var(--text3); cursor: pointer; border-right: 1px solid var(--border); white-space: nowrap; max-width: 180px; }
-.editor-tab:hover { background: var(--bg2); }
-.editor-tab.active { background: var(--bg2); color: var(--text1); border-bottom: 2px solid var(--accent); }
-.editor-tab .close { font-size: 14px; opacity: .5; margin-left: 4px; }
-.editor-tab .close:hover { opacity: 1; color: var(--red); }
-.editor-tab .modified { color: var(--orange); }
+/* ── EDITOR PANEL ── */
+.editor-panel {
+  flex: 1; display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); min-width: 0;
+}
+.editor-tabs {
+  display: flex; background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto; flex-shrink: 0; min-height: 36px;
+}
+.editor-tabs::-webkit-scrollbar { height: 0; }
+.etab {
+  display: flex; align-items: center; gap: 5px;
+  padding: 7px 12px; font-size: 12px; color: var(--text3);
+  cursor: pointer; border-right: 1px solid var(--border);
+  white-space: nowrap; max-width: 170px; flex-shrink: 0;
+}
+.etab:hover { background: var(--bg2); color: var(--text2); }
+.etab.active { background: var(--bg0); color: var(--text1); border-bottom: 2px solid var(--accent); }
+.etab .tname { overflow: hidden; text-overflow: ellipsis; }
+.etab .tclose { opacity:.5; font-size: 13px; margin-left: 2px; }
+.etab .tclose:hover { opacity:1; color: var(--red); }
+.etab .tdot { color: var(--orange); font-size: 9px; }
+
+.editor-welcome {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  color: var(--text3); padding: 40px; text-align: center; gap: 10px;
+}
+.editor-welcome .big-icon { font-size: 42px; }
+.editor-welcome h3 { font-size: 15px; color: var(--text2); font-weight: 500; }
+.editor-welcome p { font-size: 12.5px; line-height: 1.8; }
+
 .editor-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-.editor-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--bg1); border-bottom: 1px solid var(--border); }
-.editor-toolbar .filepath { font-size: 12px; color: var(--text3); font-family: 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.editor-toolbar .btn { padding: 4px 12px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg2); color: var(--text2); font-size: 11px; cursor: pointer; }
-.editor-toolbar .btn:hover { background: var(--accent2); color: #fff; border-color: var(--accent2); }
-.editor-toolbar .btn.save { border-color: var(--green); color: var(--green); }
-.editor-toolbar .btn.save:hover { background: var(--green); color: #fff; }
-.editor-textarea { flex: 1; width: 100%; padding: 12px; background: var(--bg0); color: var(--text1); border: none; font-family: 'Consolas', 'Courier New', monospace; font-size: 13px; line-height: 1.6; resize: none; outline: none; tab-size: 4; }
-.editor-welcome { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text3); font-size: 14px; text-align: center; padding: 40px; line-height: 1.8; }
-.editor-status { padding: 4px 12px; background: var(--bg1); border-top: 1px solid var(--border); font-size: 11px; color: var(--text3); display: flex; gap: 16px; }
+.editor-bar {
+  display: flex; align-items: center; gap: 7px;
+  padding: 5px 10px; background: var(--bg1);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.editor-bar .fpath {
+  font-size: 11.5px; color: var(--text3);
+  font-family: 'SF Mono','Consolas',monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.ebar-btn {
+  padding: 3px 10px; border-radius: 5px;
+  border: 1px solid var(--border); background: var(--bg2);
+  color: var(--text2); font-size: 11px; cursor: pointer;
+  display: flex; align-items: center; gap: 3px; flex-shrink: 0;
+}
+.ebar-btn:hover { background: var(--bg3); color: var(--text1); }
+.ebar-btn.save { border-color: rgba(34,197,94,.5); color: var(--green); }
+.ebar-btn.save:hover { background: var(--green); color: #000; border-color: var(--green); }
+.editor-ta {
+  flex: 1; width: 100%; padding: 12px 14px;
+  background: var(--bg0); color: var(--text1); border: none;
+  font-family: 'SF Mono','Consolas','Courier New',monospace;
+  font-size: 13px; line-height: 1.65; resize: none; outline: none; tab-size: 4;
+}
+.editor-sbar {
+  padding: 3px 10px; background: var(--bg1);
+  border-top: 1px solid var(--border);
+  font-size: 10.5px; color: var(--text3);
+  display: flex; gap: 14px; flex-shrink: 0;
+}
+.sbar-mod { color: var(--orange); }
+.sbar-ok  { color: var(--green); }
 
-/* CHAT (right) */
-.chat-panel { width: 360px; display: flex; flex-direction: column; flex-shrink: 0; background: var(--bg1); }
-.chat-header { padding: 10px 12px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
-.chat-header .title { font-size: 12px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: .5px; }
-.chat-header .new-btn { margin-left: auto; background: none; border: 1px solid var(--border); color: var(--text3); padding: 3px 10px; border-radius: 4px; font-size: 11px; cursor: pointer; }
-.chat-header .new-btn:hover { border-color: var(--accent); color: var(--accent); }
-.messages { flex: 1; overflow-y: auto; padding: 12px; }
-.msg { margin-bottom: 10px; padding: 8px 12px; border-radius: 10px; font-size: 13px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
-.msg.user { background: var(--accent2); color: #fff; margin-left: 40px; border-bottom-right-radius: 4px; }
-.msg.assistant { background: var(--bg2); color: var(--text2); margin-right: 40px; border-bottom-left-radius: 4px; }
-.msg.system { background: transparent; color: var(--text3); font-size: 11px; text-align: center; margin: 4px 0; }
-.msg .time { font-size: 10px; color: var(--text3); margin-top: 3px; }
-.msg.user .time { text-align: right; }
-.msg.assistant .time { text-align: left; }
-.msg .tool-call { margin-top: 6px; padding: 6px 8px; background: var(--bg0); border-radius: 6px; font-size: 11px; color: var(--text3); border-left: 2px solid var(--purple); }
-.typing { padding: 6px 12px; color: var(--text3); font-size: 12px; display: none; }
-.typing.show { display: block; }
-.input-area { padding: 10px 12px; border-top: 1px solid var(--border); }
-.input-row { display: flex; gap: 6px; align-items: flex-end; }
-.input-row textarea { flex: 1; resize: none; padding: 8px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--bg2); color: var(--text1); font-size: 13px; font-family: inherit; line-height: 1.5; min-height: 38px; max-height: 120px; outline: none; }
-.input-row textarea:focus { border-color: var(--accent); }
-.input-row textarea::placeholder { color: var(--text3); }
-.send-btn { padding: 8px 14px; border-radius: var(--radius); border: none; background: var(--accent2); color: #fff; font-size: 13px; cursor: pointer; height: 38px; }
-.send-btn:hover { background: var(--accent); }
-.send-btn:disabled { opacity: .4; cursor: not-allowed; }
+/* Office viewer */
+.office-view {
+  flex: 1; display: flex; align-items: center;
+  justify-content: center; padding: 40px;
+}
+.office-card {
+  background: var(--bg1); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 36px 40px;
+  text-align: center; max-width: 400px; width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.office-card .oc-icon { font-size: 52px; }
+.office-card .oc-name { font-size: 15px; font-weight: 600; color: var(--text1); word-break: break-all; }
+.office-card .oc-desc { font-size: 12.5px; color: var(--text2); line-height: 1.7; }
+.office-card .oc-open {
+  padding: 10px 28px; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius-sm);
+  font-size: 13.5px; cursor: pointer; margin-top: 4px;
+  display: flex; align-items: center; gap: 6px;
+}
+.office-card .oc-open:hover { background: var(--accent2); }
+.office-card .oc-hint { font-size: 11px; color: var(--text3); }
 
-/* SCROLLBAR */
-::-webkit-scrollbar { width: 5px; height: 5px; }
+/* ── CHAT PANEL ── */
+.chat-panel {
+  width: 390px; display: flex; flex-direction: column;
+  flex-shrink: 0; background: var(--bg1);
+}
+.chat-hdr {
+  padding: 10px 13px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; gap: 9px; flex-shrink: 0;
+}
+.claude-avatar {
+  width: 30px; height: 30px; border-radius: 50%;
+  background: linear-gradient(135deg, #d97706, #ea580c);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; flex-shrink: 0; color: #fff; font-weight: 700;
+}
+.chat-hdr-info { flex: 1; }
+.chat-hdr-name { font-size: 13px; font-weight: 600; color: var(--text1); }
+.chat-hdr-sub  { font-size: 11px; color: var(--text3); }
+.new-chat-btn {
+  background: none; border: 1px solid var(--border); color: var(--text3);
+  padding: 4px 10px; border-radius: 6px; font-size: 11px; cursor: pointer;
+}
+.new-chat-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.messages {
+  flex: 1; overflow-y: auto; padding: 14px 12px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.msg {
+  max-width: 86%; padding: 9px 13px;
+  border-radius: 16px; font-size: 13px; line-height: 1.6;
+  word-break: break-word; white-space: pre-wrap;
+}
+.msg.user {
+  background: var(--blue); color: #fff;
+  align-self: flex-end; border-bottom-right-radius: 4px;
+}
+.msg.assistant {
+  background: var(--bg2); color: var(--text1);
+  align-self: flex-start; border-bottom-left-radius: 4px;
+}
+.msg.system {
+  background: transparent; color: var(--text3);
+  font-size: 11px; text-align: center;
+  align-self: center; max-width: 100%; padding: 3px 8px;
+}
+.msg .mtime {
+  font-size: 10px; color: rgba(255,255,255,.45); margin-top: 4px; display: block;
+}
+.msg.assistant .mtime { color: var(--text3); }
+
+/* Message image/file attachments */
+.msg-img {
+  max-width: 200px; max-height: 160px;
+  border-radius: 8px; display: block;
+  margin-bottom: 7px; cursor: zoom-in;
+}
+.msg-file-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 8px;
+  background: rgba(255,255,255,.12); margin-bottom: 6px;
+  font-size: 12px;
+}
+
+/* Typing indicator */
+.typing-wrap {
+  padding: 6px 12px; display: none; align-items: center; gap: 8px;
+  color: var(--text3); font-size: 12px;
+}
+.typing-wrap.show { display: flex; }
+.tdots { display: flex; gap: 4px; }
+.tdots span {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--text3);
+  animation: tdot 1.2s ease-in-out infinite;
+}
+.tdots span:nth-child(2) { animation-delay: .2s; }
+.tdots span:nth-child(3) { animation-delay: .4s; }
+@keyframes tdot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
+
+/* ── INPUT AREA ── */
+.input-area { padding: 10px 11px 11px; border-top: 1px solid var(--border); flex-shrink: 0; }
+
+/* Attachment previews */
+.attach-row {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px;
+}
+.aprev {
+  position: relative; border-radius: 8px; overflow: hidden;
+  background: var(--bg2); border: 1px solid var(--border);
+}
+.aprev img { width: 58px; height: 58px; object-fit: cover; display: block; }
+.aprev .fchip {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 9px; font-size: 11.5px; color: var(--text2);
+  max-width: 150px;
+}
+.aprev .fchip .fn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aprev .xbtn {
+  position: absolute; top: 2px; right: 2px;
+  width: 17px; height: 17px; border-radius: 50%;
+  background: rgba(0,0,0,.75); border: none; color: #fff;
+  font-size: 11px; cursor: pointer; display: flex;
+  align-items: center; justify-content: center; line-height: 1;
+}
+
+/* Input box */
+.input-box {
+  background: var(--bg2); border: 1px solid var(--bg4);
+  border-radius: 13px; overflow: hidden;
+  transition: border-color .15s;
+}
+.input-box:focus-within { border-color: rgba(217,119,6,.6); }
+.input-box textarea {
+  width: 100%; background: transparent; border: none;
+  color: var(--text1); font-size: 13px; font-family: inherit;
+  line-height: 1.5; resize: none; outline: none;
+  padding: 10px 12px 4px; max-height: 120px; min-height: 40px;
+}
+.input-box textarea::placeholder { color: var(--text3); }
+.input-btns {
+  display: flex; align-items: center; gap: 3px;
+  padding: 4px 7px 6px;
+}
+.iact-btn {
+  background: none; border: none; color: var(--text3);
+  cursor: pointer; padding: 4px 5px; border-radius: 6px;
+  font-size: 15px; line-height: 1;
+}
+.iact-btn:hover { background: var(--bg3); color: var(--text2); }
+.send-btn {
+  margin-left: auto; width: 32px; height: 32px;
+  border-radius: 8px; border: none; background: var(--accent);
+  color: #fff; cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+  font-size: 16px; flex-shrink: 0; transition: background .15s;
+}
+.send-btn:hover { background: var(--accent2); }
+.send-btn:disabled { opacity: .35; cursor: not-allowed; }
+.send-btn svg { width:16px; height:16px; fill:currentColor; }
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* ── TOAST ── */
+.toast {
+  position: fixed; bottom: 20px; left: 50%;
+  transform: translateX(-50%) translateY(60px);
+  background: var(--bg3); color: var(--text1);
+  padding: 9px 18px; border-radius: 8px; font-size: 13px;
+  border: 1px solid var(--bg4); transition: transform .25s;
+  z-index: 999; pointer-events: none; white-space: nowrap;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* ── IMAGE LIGHTBOX ── */
+.lightbox {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.85); z-index: 1000;
+  align-items: center; justify-content: center;
+  cursor: zoom-out;
+}
+.lightbox.show { display: flex; }
+.lightbox img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
 </style>
 </head>
 <body>
 
-<!-- TOP BAR -->
+<!-- TOPBAR -->
 <div class="topbar">
-  <div class="logo">Cowork <span>Remote</span></div>
+  <div class="logo">Cowork <em>Remote</em></div>
+  <div class="spacer"></div>
   <div class="status-pills">
-    <div class="pill"><span class="dot wait" id="dotRelay"></span><span id="lblRelay">릴레이 확인 중</span></div>
-    <div class="pill"><span class="dot wait" id="dotBridge"></span><span id="lblBridge">브릿지 확인 중</span></div>
+    <div class="pill"><span class="dot wait" id="dotRelay"></span><span id="lblRelay">릴레이 연결 중</span></div>
+    <div class="pill"><span class="dot wait" id="dotBridge"></span><span id="lblBridge">브릿지 대기 중</span></div>
   </div>
 </div>
 
-<!-- 3-PANEL -->
+<!-- PANELS -->
 <div class="panels">
-  <!-- FILE EXPLORER -->
+
+  <!-- FILE PANEL -->
   <div class="file-panel">
-    <div class="file-panel-header"><span class="title">📁 파일 탐색기</span></div>
+    <div class="panel-hdr">
+      📁 파일 탐색기
+      <div class="hdr-btns">
+        <button onclick="goUp()" title="상위 폴더">↑</button>
+        <button onclick="refreshDir()" title="새로고침">↺</button>
+      </div>
+    </div>
     <div class="path-bar">
-      <input id="pathInput" value="C:\Users\winspring\Desktop" onkeydown="if(event.key==='Enter')navigateTo(this.value)">
-      <button onclick="navigateTo(document.getElementById('pathInput').value)" title="이동">↵</button>
-      <button onclick="goUp()" title="상위 폴더">↑</button>
-      <button onclick="refreshDir()" title="새로고침">↻</button>
+      <input id="pathInput" value="C:\Users\winspring\Desktop"
+             onkeydown="if(event.key==='Enter')navigateTo(this.value)">
+      <button onclick="navigateTo(document.getElementById('pathInput').value)">↵</button>
     </div>
     <div class="file-tree" id="fileTree">
-      <div class="tree-loading">브릿지 연결 대기 중...</div>
+      <div class="tree-msg">브릿지 연결 대기 중...</div>
     </div>
   </div>
 
-  <!-- EDITOR -->
+  <!-- EDITOR PANEL -->
   <div class="editor-panel">
     <div class="editor-tabs" id="editorTabs"></div>
-    <div class="editor-body">
-      <div class="editor-welcome" id="editorWelcome">
-        <div>
-          👋 회사 PC의 파일을 여기서 편집할 수 있습니다<br><br>
-          왼쪽 파일 탐색기에서 파일을 클릭하거나,<br>
-          오른쪽 채팅에서 Claude에게 요청하세요
-        </div>
+
+    <!-- Welcome screen -->
+    <div class="editor-welcome" id="editorWelcome">
+      <div class="big-icon">🖥️</div>
+      <h3>회사 PC의 파일을 여기서 편집할 수 있습니다</h3>
+      <p>
+        왼쪽 탐색기에서 파일을 클릭하거나<br>
+        오른쪽 채팅에서 Claude에게 요청하세요<br><br>
+        <span style="font-size:11px;color:var(--text3)">
+          📌 Office·HWP·PDF 파일은 회사 PC에서 앱으로 열립니다
+        </span>
+      </p>
+    </div>
+
+    <!-- Text editor -->
+    <div id="editorBody" class="editor-body" style="display:none">
+      <div class="editor-bar">
+        <span class="fpath" id="edFPath"></span>
+        <button class="ebar-btn save" onclick="saveCurrentFile()">💾 저장</button>
+        <button class="ebar-btn" onclick="reloadCurrentFile()">↻ 새로고침</button>
       </div>
-      <div id="editorContent" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
-        <div class="editor-toolbar">
-          <span class="filepath" id="editorFilePath"></span>
-          <span style="flex:1"></span>
-          <button class="btn save" onclick="saveCurrentFile()">💾 저장</button>
-          <button class="btn" onclick="reloadCurrentFile()">↻ 새로고침</button>
+      <textarea class="editor-ta" id="editorTA" spellcheck="false"></textarea>
+      <div class="editor-sbar">
+        <span>UTF-8</span>
+        <span id="edSize"></span>
+        <span id="edSaveStatus"></span>
+      </div>
+    </div>
+
+    <!-- Office / DRM viewer -->
+    <div id="officeBody" class="office-view" style="display:none">
+      <div class="office-card">
+        <div class="oc-icon" id="ocIcon">📄</div>
+        <div class="oc-name" id="ocName"></div>
+        <div class="oc-desc">
+          DRM이 걸린 파일은 회사 PC에 설치된<br>Office 프로그램으로 열어야 합니다.
         </div>
-        <textarea class="editor-textarea" id="editorTextarea" spellcheck="false"></textarea>
-        <div class="editor-status">
-          <span id="editorEncoding">UTF-8</span>
-          <span id="editorSize"></span>
-          <span id="editorSaveStatus"></span>
-        </div>
+        <button class="oc-open" id="ocOpenBtn">🖥️ 회사 PC에서 열기</button>
+        <div class="oc-hint" id="ocHint"></div>
       </div>
     </div>
   </div>
 
-  <!-- CHAT -->
+  <!-- CHAT PANEL -->
   <div class="chat-panel">
-    <div class="chat-header">
-      <span class="title">💬 Claude 채팅</span>
-      <button class="new-btn" onclick="createNewChat()">+ 새 대화</button>
+    <div class="chat-hdr">
+      <div class="claude-avatar">✦</div>
+      <div class="chat-hdr-info">
+        <div class="chat-hdr-name">Claude</div>
+        <div class="chat-hdr-sub" id="chatSubtitle">새 대화를 시작하세요</div>
+      </div>
+      <button class="new-chat-btn" onclick="createNewChat()">+ 새 대화</button>
     </div>
-    <div class="messages" id="messagesContainer"></div>
-    <div class="typing" id="typingIndicator">🤖 Claude가 응답 중...</div>
+
+    <div class="messages" id="msgContainer"></div>
+
+    <div class="typing-wrap" id="typingWrap">
+      <div class="tdots"><span></span><span></span><span></span></div>
+      <span>Claude가 응답 중...</span>
+    </div>
+
     <div class="input-area">
-      <div class="input-row">
+      <div class="attach-row" id="attachRow"></div>
+      <div class="input-box">
         <textarea id="msgInput" placeholder="메시지를 입력하세요..." rows="1"></textarea>
-        <button class="send-btn" id="sendBtn" onclick="sendMessage()">전송</button>
+        <div class="input-btns">
+          <button class="iact-btn" title="파일 첨부" onclick="document.getElementById('fileInput').click()">📎</button>
+          <input type="file" id="fileInput" multiple style="display:none" onchange="handleFileInput(this)">
+          <button class="iact-btn" title="스크린샷 요청" onclick="requestScreenshot()">🖼️</button>
+          <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
       </div>
     </div>
   </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div class="lightbox" id="lightbox" onclick="this.classList.remove('show')">
+  <img id="lightboxImg" src="" alt="">
 </div>
 
 <script>
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    CONFIG & STATE
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 const SUPA_URL = 'https://rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_KEY = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
 const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
 
 let currentPath = 'C:\\Users\\winspring\\Desktop';
-let openFiles = [];       // [{path, content, modified}]
-let activeFileIdx = -1;
-let currentChatId = null;
-let relayOnline = false;
+let openFiles    = [];
+let activeIdx    = -1;
+let chatId       = null;
+let relayOnline  = false;
 let bridgeOnline = false;
-let waitingResponse = false;
-let pollTimer = null;
-let realtimeChannel = null;
+let waiting      = false;
+let pollTimer    = null;
+let rtChannel    = null;
+let attachments  = []; // {type:'image'|'file', name, data}
 
-/* ═══════════════════════════════════════
+// Office/DRM extensions → open with native app
+const OFFICE_EXT = new Set(['docx','doc','xlsx','xls','pptx','ppt','hwp','hwpx','pdf','pdfx']);
+// Text extensions → open in editor
+const TEXT_EXT   = new Set([
+  'txt','md','markdown','js','mjs','ts','tsx','jsx','py','rb','go','rs','java','c','cpp','h',
+  'html','htm','css','scss','sass','less','json','jsonc','yaml','yml','toml','xml','csv','tsv',
+  'sh','bash','zsh','bat','cmd','ps1','psm1','ini','cfg','conf','env','log','sql','graphql','gql'
+]);
+
+/* ════════════════════════════════════════
    SUPABASE HELPERS
-   ═══════════════════════════════════════ */
-async function supaGet(table, query) {
-  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${query}`, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}` }
+════════════════════════════════════════ */
+async function sg(table, q) {
+  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${q}`, {
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` }
   });
   if (!r.ok) throw new Error(`GET ${table}: ${r.status}`);
   return r.json();
 }
-async function supaPost(table, data) {
+async function sp(table, data) {
   const r = await fetch(`${SUPA_URL}/rest/v1/${table}`, {
     method: 'POST',
-    headers: { 'apikey': SUPA_KEY, 'Authorization': `Bearer ${SUPA_KEY}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+    headers: {
+      apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`,
+      'Content-Type': 'application/json', Prefer: 'return=representation'
+    },
     body: JSON.stringify(data)
   });
   if (!r.ok) throw new Error(`POST ${table}: ${r.status}`);
   return r.json();
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    BRIDGE COMMAND EXECUTION
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 async function bridgeExec(action, content, timeout = 30000) {
-  const cmdId = 'cmd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
-  await supaPost('commands', { id: cmdId, action, target: 'local', content, status: 'pending' });
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 800));
-    const rows = await supaGet('commands', `id=eq.${cmdId}&select=status,result`);
-    if (rows.length > 0) {
-      if (rows[0].status === 'completed') return { ok: true, data: rows[0].result || '' };
-      if (rows[0].status === 'error') return { ok: false, data: rows[0].result || 'Unknown error' };
+  const id = 'cmd-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
+  await sp('commands', { id, action, target: 'local', content, status: 'pending' });
+  const end = Date.now() + timeout;
+  while (Date.now() < end) {
+    await sleep(800);
+    const rows = await sg('commands', `id=eq.${id}&select=status,result`);
+    if (rows.length) {
+      if (rows[0].status === 'completed') return { ok: true,  data: rows[0].result || '' };
+      if (rows[0].status === 'error')     return { ok: false, data: rows[0].result || 'Unknown error' };
     }
   }
   return { ok: false, data: 'Timeout' };
 }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    FILE EXPLORER
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 async function navigateTo(path) {
   path = path.trim();
   if (!path) return;
   currentPath = path;
   document.getElementById('pathInput').value = path;
   const tree = document.getElementById('fileTree');
-  tree.innerHTML = '<div class="tree-loading">로딩 중...</div>';
+  tree.innerHTML = '<div class="tree-msg">로딩 중...</div>';
 
-  const ps = `Get-ChildItem -Path '${path}' -Force | Select-Object Mode, Name, Length, LastWriteTime | ConvertTo-Json -Compress`;
+  const ps = `Get-ChildItem -Path '${path}' -Force | Select-Object Mode,Name,Length,LastWriteTime | ConvertTo-Json -Compress`;
   const res = await bridgeExec('run_ps', ps);
 
   if (!res.ok) {
-    tree.innerHTML = `<div class="tree-loading" style="color:var(--red)">오류: ${escHtml(res.data)}</div>`;
+    tree.innerHTML = `<div class="tree-msg" style="color:var(--red)">오류: ${esc(res.data)}</div>`;
     return;
   }
-
   try {
     let items = JSON.parse(res.data);
-    if (!Array.isArray(items)) items = [items];
-
-    // 폴더 먼저, 그 다음 파일 (이름순)
-    const dirs = items.filter(i => i.Mode && i.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
-    const files = items.filter(i => !i.Mode || !i.Mode.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
-
+    if (!Array.isArray(items)) items = items ? [items] : [];
+    const dirs  = items.filter(i => i.Mode?.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
+    const files = items.filter(i => !i.Mode?.startsWith('d')).sort((a,b) => a.Name.localeCompare(b.Name));
     tree.innerHTML = '';
-    for (const d of dirs) {
-      const el = mkTreeItem('📁', d.Name, '', () => navigateTo(path + '\\' + d.Name));
-      tree.appendChild(el);
-    }
-    for (const f of files) {
-      const size = f.Length != null ? formatSize(f.Length) : '';
-      const fpath = path + '\\' + f.Name;
-      const el = mkTreeItem(fileIcon(f.Name), f.Name, size, () => openFile(fpath));
-      tree.appendChild(el);
-    }
-    if (tree.children.length === 0) {
-      tree.innerHTML = '<div class="tree-loading">빈 폴더</div>';
-    }
-  } catch (e) {
-    // JSON 파싱 실패 시 텍스트로 표시
-    tree.innerHTML = `<div class="tree-loading">${escHtml(res.data).slice(0, 500)}</div>`;
+    dirs.forEach(d => tree.appendChild(mkItem('📁', d.Name, '', () => navigateTo(path + '\\' + d.Name))));
+    files.forEach(f => {
+      const ext = f.Name.split('.').pop().toLowerCase();
+      const isOffice = OFFICE_EXT.has(ext);
+      const badge = isOffice ? '<span class="app-badge">앱</span>' : '';
+      tree.appendChild(mkItem(fileIcon(f.Name), f.Name, fmtSize(f.Length), () => openFile(path + '\\' + f.Name), badge));
+    });
+    if (!tree.children.length) tree.innerHTML = '<div class="tree-msg">빈 폴더</div>';
+  } catch {
+    tree.innerHTML = `<div class="tree-msg">${esc(res.data).slice(0,400)}</div>`;
   }
 }
 
 function goUp() {
-  const parts = currentPath.replace(/\\/g, '/').split('/');
-  if (parts.length > 1) {
-    parts.pop();
-    navigateTo(parts.join('\\'));
-  }
+  const parts = currentPath.replace(/\\/g,'/').split('/');
+  if (parts.length > 1) { parts.pop(); navigateTo(parts.join('\\')); }
 }
-
 function refreshDir() { navigateTo(currentPath); }
 
-function mkTreeItem(icon, name, size, onClick) {
+function mkItem(icon, name, size, onClick, extra = '') {
   const el = document.createElement('div');
   el.className = 'tree-item';
-  el.innerHTML = `<span class="icon">${icon}</span><span class="name">${escHtml(name)}</span>${size ? `<span class="size">${size}</span>` : ''}`;
-  el.addEventListener('click', onClick);
+  el.innerHTML = `<span class="icon">${icon}</span><span class="name">${esc(name)}</span>${size?`<span class="fsize">${size}</span>`:''}${extra}`;
+  el.onclick = onClick;
   return el;
 }
 
 function fileIcon(name) {
-  const ext = name.split('.').pop().toLowerCase();
-  const icons = { txt:'📄', md:'📝', js:'🟨', py:'🐍', html:'🌐', css:'🎨', json:'📋', xml:'📋', csv:'📊', xlsx:'📊', docx:'📘', pdf:'📕', png:'🖼️', jpg:'🖼️', gif:'🖼️', bat:'⚙️', ps1:'⚙️', exe:'💠', zip:'📦' };
-  return icons[ext] || '📄';
+  const e = name.split('.').pop().toLowerCase();
+  return { txt:'📄',md:'📝',js:'🟨',ts:'🔷',jsx:'🟦',tsx:'🔷',py:'🐍',
+    html:'🌐',css:'🎨',json:'📋',xml:'📋',csv:'📊',sql:'🗃️',
+    xlsx:'📊',xls:'📊',docx:'📘',doc:'📘',pptx:'📙',ppt:'📙',
+    pdf:'📕',hwp:'📘',hwpx:'📘',
+    png:'🖼️',jpg:'🖼️',jpeg:'🖼️',gif:'🖼️',svg:'🖼️',webp:'🖼️',
+    bat:'⚡',cmd:'⚡',ps1:'⚡',exe:'🚀',zip:'📦',rar:'📦',
+  }[e] || '📄';
 }
 
-function formatSize(bytes) {
-  if (bytes == null) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1048576).toFixed(1) + ' MB';
+function fmtSize(b) {
+  if (b == null) return '';
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(1) + ' MB';
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    FILE EDITOR
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 async function openFile(path) {
-  // 이미 열린 파일이면 탭 전환
+  const ext = path.split('.').pop().toLowerCase();
+
+  // Office / DRM → native app viewer
+  if (OFFICE_EXT.has(ext)) { showOfficeCard(path); return; }
+
+  // Unknown binary → confirm
+  if (!TEXT_EXT.has(ext)) {
+    if (!confirm(`'${path.split('\\').pop()}' 파일을 텍스트로 열겠습니까?`)) return;
+  }
+
+  // Already open?
   const idx = openFiles.findIndex(f => f.path === path);
   if (idx >= 0) { activateTab(idx); return; }
 
-  // 파일 읽기
-  const ps = `Get-Content -Path '${path}' -Raw -Encoding UTF8`;
-  const res = await bridgeExec('run_ps', ps);
-
-  if (!res.ok) {
-    alert('파일을 열 수 없습니다: ' + res.data);
-    return;
-  }
+  const res = await bridgeExec('run_ps', `Get-Content -Path '${path}' -Raw -Encoding UTF8`);
+  if (!res.ok) { toast('파일 열기 실패: ' + res.data); return; }
 
   openFiles.push({ path, content: res.data, original: res.data, modified: false });
   activateTab(openFiles.length - 1);
 }
 
-function activateTab(idx) {
-  // 현재 편집 내용 저장
-  if (activeFileIdx >= 0 && activeFileIdx < openFiles.length) {
-    const ta = document.getElementById('editorTextarea');
-    openFiles[activeFileIdx].content = ta.value;
-    openFiles[activeFileIdx].modified = (ta.value !== openFiles[activeFileIdx].original);
-  }
+function showOfficeCard(path) {
+  const name = path.split('\\').pop();
+  const ext  = name.split('.').pop().toLowerCase();
+  const icons = { docx:'📘',doc:'📘',xlsx:'📊',xls:'📊',pptx:'📙',ppt:'📙',pdf:'📕',hwp:'📘',hwpx:'📘' };
 
-  activeFileIdx = idx;
+  document.getElementById('editorWelcome').style.display = 'none';
+  document.getElementById('editorBody').style.display    = 'none';
+  document.getElementById('officeBody').style.display    = 'flex';
+  document.getElementById('ocIcon').textContent  = icons[ext] || '📄';
+  document.getElementById('ocName').textContent  = name;
+  document.getElementById('ocHint').textContent  = '';
+  document.getElementById('ocOpenBtn').onclick   = () => openWithApp(path);
+}
+
+async function openWithApp(path) {
+  document.getElementById('ocHint').textContent = '열고 있습니다...';
+  const res = await bridgeExec('run_ps', `Invoke-Item '${path.replace(/'/g,"''")}'`);
+  if (res.ok) {
+    document.getElementById('ocHint').textContent = '✅ 회사 PC에서 파일을 열었습니다';
+    toast('✅ ' + path.split('\\').pop() + ' 열기 완료');
+  } else {
+    document.getElementById('ocHint').textContent = '❌ ' + res.data;
+    toast('❌ 열기 실패: ' + res.data);
+  }
+}
+
+function activateTab(idx) {
+  // Save current
+  if (activeIdx >= 0 && activeIdx < openFiles.length) {
+    const ta = document.getElementById('editorTA');
+    openFiles[activeIdx].content  = ta.value;
+    openFiles[activeIdx].modified = ta.value !== openFiles[activeIdx].original;
+  }
+  activeIdx = idx;
   renderTabs();
+
+  document.getElementById('officeBody').style.display = 'none';
 
   if (idx < 0 || idx >= openFiles.length) {
     document.getElementById('editorWelcome').style.display = 'flex';
-    document.getElementById('editorContent').style.display = 'none';
+    document.getElementById('editorBody').style.display    = 'none';
     return;
   }
-
   document.getElementById('editorWelcome').style.display = 'none';
-  document.getElementById('editorContent').style.display = 'flex';
+  document.getElementById('editorBody').style.display    = 'flex';
 
-  const file = openFiles[idx];
-  document.getElementById('editorFilePath').textContent = file.path;
-  document.getElementById('editorTextarea').value = file.content;
-  document.getElementById('editorSize').textContent = new Blob([file.content]).size + ' bytes';
-  document.getElementById('editorSaveStatus').textContent = file.modified ? '● 수정됨' : '✓ 저장됨';
-  document.getElementById('editorSaveStatus').style.color = file.modified ? 'var(--orange)' : 'var(--green)';
+  const f = openFiles[idx];
+  document.getElementById('edFPath').textContent    = f.path;
+  document.getElementById('editorTA').value         = f.content;
+  document.getElementById('edSize').textContent     = new Blob([f.content]).size + ' bytes';
+  setSaveStatus(f.modified);
 }
 
 function renderTabs() {
-  const el = document.getElementById('editorTabs');
-  el.innerHTML = openFiles.map((f, i) => {
-    const name = f.path.split('\\').pop();
-    const active = i === activeFileIdx;
-    const mod = f.modified ? '<span class="modified">●</span>' : '';
-    return `<div class="editor-tab ${active ? 'active' : ''}" onclick="activateTab(${i})">${mod}${escHtml(name)}<span class="close" onclick="event.stopPropagation();closeTab(${i})">×</span></div>`;
+  document.getElementById('editorTabs').innerHTML = openFiles.map((f,i) => {
+    const name   = f.path.split('\\').pop();
+    const active = i === activeIdx ? 'active' : '';
+    const dot    = f.modified ? '<span class="tdot">●</span>' : '';
+    return `<div class="etab ${active}" onclick="activateTab(${i})">
+      ${dot}<span class="tname">${esc(name)}</span>
+      <span class="tclose" onclick="event.stopPropagation();closeTab(${i})">×</span>
+    </div>`;
   }).join('');
 }
 
+function setSaveStatus(modified) {
+  const el = document.getElementById('edSaveStatus');
+  el.textContent = modified ? '● 수정됨' : '✓ 저장됨';
+  el.className   = modified ? 'sbar-mod' : 'sbar-ok';
+}
+
 function closeTab(idx) {
-  if (openFiles[idx].modified && !confirm('저장하지 않은 변경사항이 있습니다. 닫으시겠습니까?')) return;
+  if (openFiles[idx].modified && !confirm('저장하지 않은 변경사항이 있습니다. 닫겠습니까?')) return;
   openFiles.splice(idx, 1);
-  if (activeFileIdx >= openFiles.length) activeFileIdx = openFiles.length - 1;
-  if (activeFileIdx < 0) activeFileIdx = -1;
-  activateTab(activeFileIdx);
+  if (activeIdx >= openFiles.length) activeIdx = openFiles.length - 1;
+  activateTab(activeIdx < 0 ? -1 : activeIdx);
 }
 
 async function saveCurrentFile() {
-  if (activeFileIdx < 0) return;
-  const file = openFiles[activeFileIdx];
-  const ta = document.getElementById('editorTextarea');
-  file.content = ta.value;
+  if (activeIdx < 0) return;
+  const f  = openFiles[activeIdx];
+  f.content = document.getElementById('editorTA').value;
+  setSaveStatus('saving');
+  document.getElementById('edSaveStatus').textContent = '저장 중...';
 
-  const statusEl = document.getElementById('editorSaveStatus');
-  statusEl.textContent = '저장 중...';
-  statusEl.style.color = 'var(--orange)';
-
-  const res = await bridgeExec('write_file', JSON.stringify({ path: file.path, content: file.content }));
-
+  const res = await bridgeExec('write_file', JSON.stringify({ path: f.path, content: f.content }));
   if (res.ok) {
-    file.original = file.content;
-    file.modified = false;
-    statusEl.textContent = '✓ 저장 완료';
-    statusEl.style.color = 'var(--green)';
-    renderTabs();
+    f.original = f.content; f.modified = false;
+    setSaveStatus(false); renderTabs(); toast('✅ 저장 완료');
   } else {
-    statusEl.textContent = '저장 실패: ' + res.data;
-    statusEl.style.color = 'var(--red)';
+    toast('❌ 저장 실패: ' + res.data);
   }
 }
 
 async function reloadCurrentFile() {
-  if (activeFileIdx < 0) return;
-  const file = openFiles[activeFileIdx];
-  const ps = `Get-Content -Path '${file.path}' -Raw -Encoding UTF8`;
-  const res = await bridgeExec('run_ps', ps);
-  if (res.ok) {
-    file.content = res.data;
-    file.original = res.data;
-    file.modified = false;
-    activateTab(activeFileIdx);
-  }
+  if (activeIdx < 0) return;
+  const f   = openFiles[activeIdx];
+  const res = await bridgeExec('run_ps', `Get-Content -Path '${f.path}' -Raw -Encoding UTF8`);
+  if (res.ok) { f.content = f.original = res.data; f.modified = false; activateTab(activeIdx); toast('↻ 새로고침'); }
 }
 
-// 에디터 수정 감지
 document.addEventListener('DOMContentLoaded', () => {
-  document.getElementById('editorTextarea').addEventListener('input', () => {
-    if (activeFileIdx < 0) return;
-    const file = openFiles[activeFileIdx];
-    file.content = document.getElementById('editorTextarea').value;
-    file.modified = (file.content !== file.original);
-    document.getElementById('editorSaveStatus').textContent = file.modified ? '● 수정됨' : '✓ 저장됨';
-    document.getElementById('editorSaveStatus').style.color = file.modified ? 'var(--orange)' : 'var(--green)';
-    renderTabs();
+  document.getElementById('editorTA').addEventListener('input', () => {
+    if (activeIdx < 0) return;
+    const f = openFiles[activeIdx];
+    f.content  = document.getElementById('editorTA').value;
+    f.modified = f.content !== f.original;
+    document.getElementById('edSize').textContent = new Blob([f.content]).size + ' bytes';
+    setSaveStatus(f.modified); renderTabs();
   });
 });
-
-/* Ctrl+S 저장 단축키 */
-document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault();
-    saveCurrentFile();
-  }
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); saveCurrentFile(); }
 });
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    CHAT
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 async function createNewChat() {
-  currentChatId = 'chat-' + Math.random().toString(36).slice(2, 10);
-  document.getElementById('messagesContainer').innerHTML = '';
+  chatId = 'chat-' + Math.random().toString(36).slice(2,10);
+  document.getElementById('msgContainer').innerHTML = '';
+  document.getElementById('chatSubtitle').textContent = chatId.slice(0,12) + '...';
   setWaiting(false);
+  attachments = [];
+  renderAttachRow();
   setupRealtime();
 }
 
 async function sendMessage() {
   const input = document.getElementById('msgInput');
-  const text = input.value.trim();
-  if (!text || !currentChatId) return;
-  if (!relayOnline) { alert('릴레이가 오프라인입니다.'); return; }
+  const text  = input.value.trim();
+  if (!text && attachments.length === 0) return;
+  if (!chatId) return;
+  if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
 
-  input.value = '';
-  autoResize();
+  // Build full content including file/image context
+  const imgs  = attachments.filter(a => a.type === 'image');
+  const files = attachments.filter(a => a.type === 'file');
+  let full = text;
+  if (files.length)  full += '\n\n' + files.map(a => `[첨부 파일: ${a.name}]\n\`\`\`\n${a.data}\n\`\`\``).join('\n\n');
+  if (imgs.length)   full += '\n\n[이미지 ' + imgs.length + '개 첨부됨: ' + imgs.map(a=>a.name).join(', ') + ']';
+
+  const snap = [...attachments];
+  input.value = ''; autoResize();
+  attachments = []; renderAttachRow();
 
   const msgId = 'u-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
-  appendMsg({ id: msgId, role: 'user', content: text, created_at: new Date().toISOString() });
-  scrollBottom();
-  setWaiting(true);
+  appendMsg({ id: msgId, role: 'user', content: text, attachments: snap, created_at: new Date().toISOString() });
+  scrollBot(); setWaiting(true);
 
   try {
-    await supaPost('messages', { id: msgId, chat_id: currentChatId, role: 'user', content: text, status: 'pending' });
+    await sp('messages', { id: msgId, chat_id: chatId, role: 'user', content: full, status: 'pending' });
     startPolling(2000);
-  } catch (e) {
-    appendMsg({ id: 'err-' + Date.now(), role: 'system', content: '전송 실패: ' + e.message });
+  } catch(e) {
+    appendMsg({ id: 'e' + Date.now(), role: 'system', content: '전송 실패: ' + e.message });
     setWaiting(false);
   }
 }
 
+/* ════════════════════════════════════════
+   ATTACHMENTS
+════════════════════════════════════════ */
+async function handleFileInput(input) {
+  for (const f of input.files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (f.type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
+      const data = await readDataURL(f);
+      attachments.push({ type:'image', name: f.name, data });
+    } else {
+      try {
+        const data = await readText(f);
+        attachments.push({ type:'file', name: f.name, data });
+      } catch { toast('읽기 실패: ' + f.name); }
+    }
+  }
+  input.value = '';
+  renderAttachRow();
+}
+
+function readDataURL(f) {
+  return new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); });
+}
+function readText(f) {
+  return new Promise((res,rej) => { const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsText(f,'UTF-8'); });
+}
+
+// Image paste
+document.addEventListener('paste', async e => {
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const f    = item.getAsFile();
+      const data = await readDataURL(f);
+      attachments.push({ type:'image', name:'pasted-' + Date.now() + '.png', data });
+      renderAttachRow();
+      break;
+    }
+  }
+});
+
+function renderAttachRow() {
+  document.getElementById('attachRow').innerHTML = attachments.map((a,i) =>
+    a.type === 'image'
+      ? `<div class="aprev"><img src="${a.data}" alt="${esc(a.name)}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      : `<div class="aprev"><div class="fchip">📄<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+  ).join('');
+}
+function rmAttach(i) { attachments.splice(i,1); renderAttachRow(); }
+
+async function requestScreenshot() {
+  if (!bridgeOnline) { toast('브릿지가 연결되지 않았습니다'); return; }
+  toast('스크린샷 요청 중...');
+  const res = await bridgeExec('run_ps', `
+    Add-Type -AssemblyName System.Windows.Forms
+    $path = "$env:TEMP\\cowork_ss_${Date.now()}.png"
+    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+    $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
+    $g = [System.Drawing.Graphics]::FromImage($bmp)
+    $g.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+    $bmp.Save($path)
+    $g.Dispose(); $bmp.Dispose()
+    [Convert]::ToBase64String([IO.File]::ReadAllBytes($path))
+  `, 15000);
+  if (res.ok && res.data.length > 100) {
+    const dataUrl = 'data:image/png;base64,' + res.data.trim();
+    attachments.push({ type:'image', name:'screenshot-' + Date.now() + '.png', data: dataUrl });
+    renderAttachRow();
+    toast('📸 스크린샷 첨부됨');
+  } else {
+    toast('❌ 스크린샷 실패: ' + res.data.slice(0,80));
+  }
+}
+
+/* ════════════════════════════════════════
+   MESSAGE RENDERING
+════════════════════════════════════════ */
 function appendMsg(msg) {
-  const container = document.getElementById('messagesContainer');
-  let el = document.getElementById('msg-' + msg.id);
-  if (el) { el.querySelector('.mc').textContent = msg.content || ''; return; }
+  const container = document.getElementById('msgContainer');
+  let el = document.getElementById('m-' + msg.id);
+
+  if (el) {
+    const mc = el.querySelector('.mc');
+    if (mc) mc.textContent = parseContent(msg.content || '');
+    return;
+  }
+
   el = document.createElement('div');
-  el.id = 'msg-' + msg.id;
-  el.className = `msg ${msg.role || 'system'}`;
-  const time = msg.created_at ? new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' }) : '';
-  el.innerHTML = `<div class="mc">${escHtml(msg.content || '')}</div><div class="time">${time}</div>`;
+  el.id = 'm-' + msg.id;
+
+  const time = msg.created_at
+    ? new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' })
+    : '';
+
+  if (msg.role === 'system') {
+    el.className = 'msg system';
+    el.textContent = msg.content || '';
+  } else {
+    el.className = 'msg ' + msg.role;
+    let inner = '';
+
+    // Render attachments
+    if (msg.attachments?.length) {
+      msg.attachments.forEach(a => {
+        if (a.type === 'image') {
+          inner += `<img class="msg-img" src="${a.data}" alt="${esc(a.name)}" onclick="lightbox('${a.data}')">`;
+        } else {
+          inner += `<div class="msg-file-chip">📄 ${esc(a.name)}</div>`;
+        }
+      });
+    }
+
+    const content = parseContent(msg.content || '');
+    inner += `<div class="mc">${esc(content)}</div>`;
+    if (time) inner += `<span class="mtime">${time}</span>`;
+    el.innerHTML = inner;
+  }
+
   container.appendChild(el);
 }
 
-function scrollBottom() {
-  const c = document.getElementById('messagesContainer');
+// Parse relay JSON responses to extract clean text
+function parseContent(raw) {
+  if (!raw) return '';
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.text)    return parsed.text;
+      if (parsed.content) return parsed.content;
+      if (parsed.error)   return '⚠️ ' + parsed.error;
+    } catch {}
+  }
+  return raw;
+}
+
+function scrollBot() {
+  const c = document.getElementById('msgContainer');
   c.scrollTop = c.scrollHeight;
 }
 
 function setWaiting(on) {
-  waitingResponse = on;
-  document.getElementById('typingIndicator').classList.toggle('show', on);
+  waiting = on;
+  document.getElementById('typingWrap').classList.toggle('show', on);
   document.getElementById('sendBtn').disabled = on;
 }
 
-/* POLLING */
-function startPolling(interval = 5000) {
+function lightbox(src) {
+  document.getElementById('lightboxImg').src = src;
+  document.getElementById('lightbox').classList.add('show');
+}
+
+/* ════════════════════════════════════════
+   POLLING & REALTIME
+════════════════════════════════════════ */
+function startPolling(iv = 5000) {
   stopPolling();
   pollMessages();
-  pollTimer = setInterval(pollMessages, interval);
+  pollTimer = setInterval(pollMessages, iv);
 }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null; } }
 
 async function pollMessages() {
-  if (!currentChatId) return;
+  if (!chatId) return;
   try {
-    const msgs = await supaGet('messages', `chat_id=eq.${currentChatId}&order=created_at.asc&select=id,role,content,status,created_at`);
+    const msgs = await sg('messages', `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at`);
     let hasNew = false;
-    for (const m of msgs) {
-      const ex = document.getElementById('msg-' + m.id);
+    msgs.forEach(m => {
+      const ex = document.getElementById('m-' + m.id);
       if (ex) {
         const mc = ex.querySelector('.mc');
-        if (mc && mc.textContent !== (m.content || '')) { mc.textContent = m.content || ''; scrollBottom(); }
+        const parsed = parseContent(m.content || '');
+        if (mc && mc.textContent !== parsed) { mc.textContent = parsed; scrollBot(); }
       } else {
         appendMsg(m);
         if (m.role === 'assistant') hasNew = true;
       }
-    }
+    });
     if (hasNew) {
-      scrollBottom();
+      scrollBot();
       const last = [...msgs].reverse().find(m => m.role === 'assistant');
       if (last && (last.status === 'completed' || last.status === 'error')) {
-        setWaiting(false);
-        startPolling(5000);
+        setWaiting(false); startPolling(5000);
       }
     }
-  } catch (e) { console.error('poll error:', e); }
+  } catch(e) { console.error('poll:', e); }
 }
 
-/* REALTIME */
 function setupRealtime() {
-  if (realtimeChannel) sb.removeChannel(realtimeChannel);
-  if (!currentChatId) return;
-  realtimeChannel = sb.channel('msg-' + currentChatId)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages', filter: `chat_id=eq.${currentChatId}` }, (payload) => {
+  if (rtChannel) sb.removeChannel(rtChannel);
+  if (!chatId) return;
+  rtChannel = sb.channel('rt-' + chatId)
+    .on('postgres_changes', { event:'*', schema:'public', table:'messages', filter:`chat_id=eq.${chatId}` }, payload => {
       const m = payload.new;
       if (!m) return;
-      const ex = document.getElementById('msg-' + m.id);
-      if (ex) { const mc = ex.querySelector('.mc'); if (mc) mc.textContent = m.content || ''; }
+      const ex = document.getElementById('m-' + m.id);
+      const parsed = parseContent(m.content || '');
+      if (ex) { const mc = ex.querySelector('.mc'); if (mc) mc.textContent = parsed; }
       else appendMsg(m);
-      scrollBottom();
+      scrollBot();
       if (m.role === 'assistant' && (m.status === 'completed' || m.status === 'error')) setWaiting(false);
     })
     .subscribe();
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    HEARTBEATS
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 async function checkRelay() {
   try {
-    const rows = await supaGet('commands', 'id=eq.relay-heartbeat&select=result,content');
-    if (rows.length > 0 && rows[0].result) {
+    const rows = await sg('commands', 'id=eq.relay-heartbeat&select=result,content');
+    if (rows.length && rows[0].result) {
       const ago = Math.floor((Date.now() - new Date(rows[0].result).getTime()) / 1000);
       if (ago < 90) {
         relayOnline = true;
-        const s = rows[0].content === 'busy' ? '처리 중' : '대기 중';
-        setStatus('Relay', 'on', `릴레이 (${s})`);
+        setStatus('Relay', 'on', '릴레이 ' + (rows[0].content === 'busy' ? '(처리 중)' : '(대기 중)'));
       } else { relayOnline = false; setStatus('Relay', 'off', '릴레이 오프라인'); }
-    } else { relayOnline = false; setStatus('Relay', 'off', '릴레이 미연결'); }
-  } catch { setStatus('Relay', 'off', '체크 실패'); }
+    } else { relayOnline = false; setStatus('Relay', 'off', '릴레이 연결 중'); }
+  } catch { setStatus('Relay', 'off', '연결 실패'); }
 }
 
 async function checkBridge() {
   try {
-    const rows = await supaGet('commands', 'id=eq.bridge-heartbeat&select=result');
-    if (rows.length > 0 && rows[0].result) {
+    const rows = await sg('commands', 'id=eq.bridge-heartbeat&select=result');
+    if (rows.length && rows[0].result) {
       const ago = Math.floor((Date.now() - new Date(rows[0].result).getTime()) / 1000);
-      if (ago < 120) { bridgeOnline = true; setStatus('Bridge', 'on', '브릿지 연결됨'); if (!document.getElementById('fileTree').querySelector('.tree-item')) refreshDir(); }
-      else { bridgeOnline = false; setStatus('Bridge', 'off', '브릿지 오프라인'); }
+      if (ago < 120) {
+        bridgeOnline = true;
+        setStatus('Bridge', 'on', '브릿지 연결됨');
+        if (!document.getElementById('fileTree').querySelector('.tree-item')) refreshDir();
+      } else { bridgeOnline = false; setStatus('Bridge', 'off', '브릿지 오프라인'); }
     } else { bridgeOnline = false; setStatus('Bridge', 'wait', '브릿지 대기 중'); }
-  } catch { setStatus('Bridge', 'off', '체크 실패'); }
+  } catch { setStatus('Bridge', 'off', '연결 실패'); }
 }
 
-function setStatus(which, state, text) {
-  document.getElementById('dot' + which).className = 'dot ' + state;
-  document.getElementById('lbl' + which).textContent = text;
+function setStatus(w, s, t) {
+  document.getElementById('dot' + w).className = 'dot ' + s;
+  document.getElementById('lbl' + w).textContent = t;
 }
 
-/* ═══════════════════════════════════════
+/* ════════════════════════════════════════
    INPUT HANDLING
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 function setupInput() {
-  const input = document.getElementById('msgInput');
-  input.addEventListener('keydown', (e) => {
+  const inp = document.getElementById('msgInput');
+  inp.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      if (e.isComposing) return;
-      sendMessage();
+      if (!e.isComposing) sendMessage();
     }
   });
-  input.addEventListener('input', autoResize);
+  inp.addEventListener('input', autoResize);
 }
-
 function autoResize() {
-  const input = document.getElementById('msgInput');
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, 120) + 'px';
+  const inp = document.getElementById('msgInput');
+  inp.style.height = 'auto';
+  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
 }
 
-function escHtml(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
-/* ═══════════════════════════════════════
+function toast(msg, dur = 3000) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), dur);
+}
+
+/* ════════════════════════════════════════
    INIT
-   ═══════════════════════════════════════ */
+════════════════════════════════════════ */
 document.addEventListener('DOMContentLoaded', async () => {
   setupInput();
   createNewChat();
   await Promise.all([checkRelay(), checkBridge()]);
-  setInterval(checkRelay, 15000);
+  setInterval(checkRelay,  15000);
   setInterval(checkBridge, 30000);
 });
 </script>
