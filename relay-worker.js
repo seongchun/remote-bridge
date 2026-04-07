@@ -94,10 +94,10 @@ function runClaude(prompt) {
     const tmpFile = path.join(os.tmpdir(), 'relay-' + Date.now() + '.txt');
     try { fs.writeFileSync(tmpFile, prompt, 'utf8'); } catch(e) { reject(new Error('tmpfile: ' + e.message)); return; }
 
-    const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
+    const cmd = CLAUDE_EXE + ' --print --dangerously-skip-permissions < "' + tmpFile + '"';
     console.log('[Claude] 실행 (prompt ' + prompt.length + '자)');
 
-    const proc = spawn(cmd, [], { timeout: CONFIG.claudeTimeout, shell: true, env: process.env });
+    const proc = spawn(cmd, [], { timeout: CONFIG.claudeTimeout, shell: true, env: process.env, windowsHide: true });
     let out = '', err = '';
     proc.stdout.on('data', d => { out += d.toString(); });
     proc.stderr.on('data', d => { err += d.toString(); });
