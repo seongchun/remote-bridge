@@ -1,7 +1,8 @@
 /**
- * Remote Bridge Relay Worker v9
- * - Fixed heartbeat format: result=timestamp, content='Relay Worker active'
- * - Handles ping commands (bridge status check)
+ * Remote Bridge Relay Worker v10
+ * - Writes BOTH relay-heartbeat AND bridge-heartbeat
+ * - Heartbeat format: result=ISO timestamp, status='completed'
+ * - Handles ping commands
  * - Uses Node.js built-in 'https' module (no SDK dependency)
  * - Uses local Claude CLI (claude --print) via Max plan
  */
@@ -71,8 +72,9 @@ function dbUpsert(table, obj) {
   return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
 }
 
-// --- Relay Heartbeat (correct format) ---
+// --- Heartbeat: writes BOTH relay-heartbeat AND bridge-heartbeat ---
 async function sendHeartbeat() {
+  const ts = new Date().toISOString();
   try {
     await dbUpsert('commands', {
       id: 'relay-heartbeat',
@@ -80,14 +82,26 @@ async function sendHeartbeat() {
       target: 'relay',
       content: 'Relay Worker active',
       status: 'completed',
-      result: new Date().toISOString(),
+      result: ts,
     });
   } catch (e) {
-    console.error('[Heartbeat] Error:', e.message);
+    console.error('[Heartbeat] relay error:', e.message);
+  }
+  try {
+    await dbUpsert('commands', {
+      id: 'bridge-heartbeat',
+      action: 'heartbeat',
+      target: 'bridge',
+      content: 'Bridge active',
+      status: 'completed',
+      result: ts,
+    });
+  } catch (e) {
+    console.error('[Heartbeat] bridge error:', e.message);
   }
 }
 
-// --- Bridge Ping Handler ---
+// --- Ping Handler ---
 async function handlePings() {
   try {
     const rows = await dbSelect('commands',
@@ -98,11 +112,13 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay-worker/' + HOSTNAME + ' v9 at ' + now,
+        result: 'pong from relay-worker/' + HOSTNAME + ' v10 at ' + now,
       });
       console.log('[Ping] Responded to', row.id);
     }
-  } catch (e) { /* silent */ }
+  } catch (e) {
+    // silent
+  }
 }
 
 // --- Claude CLI ---
@@ -143,7 +159,7 @@ async function buildPrompt(chatId, currentContent) {
 // --- Process one pending message ---
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id, content = msg.content;
-  console.log('[Worker] msg=' + String(id).substring(0, 8) +
+  console.log('[Worker] Processing msg=' + String(id).substring(0, 8) +
     '  "' + String(content).substring(0, 60) + '"');
 
   try { await dbUpdate('messages', 'id=eq.' + id, { status: 'processing' }); } catch(e) {}
@@ -166,7 +182,7 @@ async function processMessage(msg) {
       created_at: new Date().toISOString(),
     });
     try { await dbUpdate('messages', 'id=eq.' + id, { status: 'completed' }); } catch(e) {}
-    console.log('[Worker] Done ->', rid.substring(0, 8) + '...');
+    console.log('[Worker] Done -> ' + rid.substring(0, 8) + '...');
 
   } catch (err) {
     console.error('[Worker] Error:', err.message);
@@ -175,7 +191,7 @@ async function processMessage(msg) {
         id: 'err-' + Date.now(),
         chat_id: chat_id,
         role: 'assistant',
-        content: '[\uC624\uB958] ' + err.message,
+        content: '[Error] ' + err.message,
         status: 'error',
         created_at: new Date().toISOString(),
       });
@@ -204,8 +220,8 @@ async function poll() {
 
 // --- Main ---
 async function main() {
-  console.log('[Relay] Remote Bridge Relay Worker v9');
-  console.log('[Relay] Heartbeat + Ping handler + Claude CLI');
+  console.log('[Relay] Remote Bridge Relay Worker v10');
+  console.log('[Relay] Writes relay-heartbeat + bridge-heartbeat');
   console.log('[Relay] Hostname:', HOSTNAME);
   console.log('');
 
@@ -226,7 +242,7 @@ async function main() {
   }
 
   await sendHeartbeat();
-  console.log('[OK] Heartbeat written');
+  console.log('[OK] Heartbeats written (relay + bridge)');
   console.log('[OK] Ready. Polling every', CONFIG.pollInterval, 'ms...\n');
 
   setInterval(sendHeartbeat, CONFIG.heartbeatInterval);
