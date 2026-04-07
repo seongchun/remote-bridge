@@ -889,7 +889,7 @@ async function loadChat(id, title) {
   renderChatList();
   try {
     const msgs = await sgRaw('messages',
-      `chat_id=eq.${id}&order=created_at.asc&select=id,role,content,status,created_at,attachments`);
+      `chat_id=eq.${id}&order=created_at.asc&select=id,role,content,status,created_at`);
     msgs.forEach(m => appendMsg(m));
     scrollBot();
   } catch(e) { console.error(e); }
@@ -949,11 +949,9 @@ async function sendMessage() {
   scrollBot();
 
   try {
-    await sp('messages', {
-      id: msgId, chat_id: chatId,
-      role: 'user', content: full, status: 'pending',
-      attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data}))
-    });
+    const _md={id:msgId,chat_id:chatId,role:'user',content:full,status:'pending'};
+    if(imgs.length>0)_md.attachments=imgs.map(a=>({type:'image',name:a.name,data:a.data}));
+    await sp('messages',_md);
     startPolling(2000);
   } catch(e) {
     toast('전송 실패: ' + e.message);
@@ -1148,7 +1146,7 @@ async function pollMessages() {
   if (!chatId) return;
   try {
     const msgs = await sgRaw('messages',
-      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at,attachments`);
+      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at`);
     let hasNew = false;
     msgs.forEach(m => {
       const ex = document.getElementById('m-'+m.id);
