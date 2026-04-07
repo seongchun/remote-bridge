@@ -1108,7 +1108,7 @@ function renderSteps(steps, active) {
   document.getElementById('rpStepList').innerHTML = steps.slice(-18).map(s => {
     const firstChar = [...s][0];
     const icon = ICONS[firstChar] || '▸';
-    const text = s.replace(/^[\u2705\u274C\U0001F9E0\u26A1\U0001F527\U0001F504\U0001F4DD\U0001F4AC\U0001F50C\u26A0]\s*/u,'').replace(/^▸\s*/,'');
+    const text = s.replace(/^[\u2705\u274C\u{1F9E0}\u26A1\u{1F527}\u{1F504}\u{1F4DD}\u{1F4AC}\u{1F50C}\u26A0]\s*/u,'').replace(/^▸\s*/,'');
     const isActive = s === active;
     return `<div class="step-item${isActive?' active':''}">
       <span class="step-icon">${icon}</span>
