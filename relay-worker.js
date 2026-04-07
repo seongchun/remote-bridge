@@ -1,47 +1,50 @@
 /**
- * Remote Bridge Relay Worker v10
+ * Remote Bridge Relay Worker v11
+ * - FIX: Windows에서 claude.cmd를 찾지 못하는 문제 해결
+ *   -> execSync/spawn 모두 { shell: true } 추가
+ *   -> CLAUDE_PATH 환경변수로 경로 직접 지정 가능
  * - Writes BOTH relay-heartbeat AND bridge-heartbeat
- * - Heartbeat format: result=ISO timestamp, status='completed'
- * - Handles ping commands
  * - Uses Node.js built-in 'https' module (no SDK dependency)
  * - Uses local Claude CLI (claude --print) via Max plan
  */
-
-const https = require('https');
+const https    = require('https');
 const { spawn } = require('child_process');
 const { execSync } = require('child_process');
-const crypto = require('crypto');
-const os = require('os');
+const crypto   = require('crypto');
+const os       = require('os');
 
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
 
 const CONFIG = {
-  pollInterval: 3000,
-  claudeTimeout: 300000,
+  pollInterval:      3000,
+  claudeTimeout:     300000,
   heartbeatInterval: 15000,
 };
 
 let isProcessing = false;
 const HOSTNAME = os.hostname();
 
+// Windows에서 claude 실행파일 경로 결정
+// start-relay.bat 이 CLAUDE_PATH 환경변수를 설정하면 그것을 우선 사용
+const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
+
 // --- HTTPS helper ---
 function supaReq(method, path, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
     const headers = {
-      'apikey': SUPA_KEY,
+      'apikey':        SUPA_KEY,
       'Authorization': 'Bearer ' + SUPA_KEY,
-      'Content-Type': 'application/json',
+      'Content-Type':  'application/json',
     };
     if (extraHeaders) Object.assign(headers, extraHeaders);
     if (bodyStr) headers['Content-Length'] = Buffer.byteLength(bodyStr);
-
     const req = https.request({
       hostname: SUPA_HOST,
-      path: '/rest/v1/' + path,
-      method: method,
-      headers: headers,
+      path:     '/rest/v1/' + path,
+      method:   method,
+      headers:  headers,
     }, res => {
       let raw = '';
       res.on('data', c => raw += c);
@@ -59,74 +62,52 @@ function supaReq(method, path, body, extraHeaders) {
   });
 }
 
-function dbSelect(table, query) {
-  return supaReq('GET', table + (query ? '?' + query : ''), null, null);
-}
-function dbInsert(table, obj) {
-  return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' });
-}
-function dbUpdate(table, query, obj) {
-  return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' });
-}
-function dbUpsert(table, obj) {
-  return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
-}
+function dbSelect(table, query) { return supaReq('GET', table + (query ? '?' + query : ''), null, null); }
+function dbInsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' }); }
+function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' }); }
+function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
 
 // --- Heartbeat: writes BOTH relay-heartbeat AND bridge-heartbeat ---
 async function sendHeartbeat() {
   const ts = new Date().toISOString();
   try {
     await dbUpsert('commands', {
-      id: 'relay-heartbeat',
-      action: 'heartbeat',
-      target: 'relay',
-      content: 'Relay Worker active',
-      status: 'completed',
-      result: ts,
+      id: 'relay-heartbeat', action: 'heartbeat', target: 'relay',
+      content: 'Relay Worker active', status: 'completed', result: ts,
     });
-  } catch (e) {
-    console.error('[Heartbeat] relay error:', e.message);
-  }
+  } catch (e) { console.error('[Heartbeat] relay error:', e.message); }
   try {
     await dbUpsert('commands', {
-      id: 'bridge-heartbeat',
-      action: 'heartbeat',
-      target: 'bridge',
-      content: 'Bridge active',
-      status: 'completed',
-      result: ts,
+      id: 'bridge-heartbeat', action: 'heartbeat', target: 'bridge',
+      content: 'Bridge active', status: 'completed', result: ts,
     });
-  } catch (e) {
-    console.error('[Heartbeat] bridge error:', e.message);
-  }
+  } catch (e) { console.error('[Heartbeat] bridge error:', e.message); }
 }
 
 // --- Ping Handler ---
 async function handlePings() {
   try {
-    const rows = await dbSelect('commands',
-      'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
+    const rows = await dbSelect('commands', 'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
     if (!rows || rows.length === 0) return;
-
     const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay-worker/' + HOSTNAME + ' v10 at ' + now,
+        result: 'pong from relay-worker/' + HOSTNAME + ' v11 at ' + now,
       });
       console.log('[Ping] Responded to', row.id);
     }
-  } catch (e) {
-    // silent
-  }
+  } catch (e) { /* silent */ }
 }
 
 // --- Claude CLI ---
+// FIX: shell: true -> Windows에서 claude.cmd / claude.bat 실행 가능
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('claude', ['--print', prompt], {
+    const proc = spawn(CLAUDE_EXE, ['--print', prompt], {
       timeout: CONFIG.claudeTimeout,
-      env: process.env,
+      env:     process.env,
+      shell:   true,
     });
     let out = '', err = '';
     proc.stdout.on('data', d => { out += d.toString(); });
@@ -135,7 +116,10 @@ function runClaude(prompt) {
       if (code === 0) resolve(out.trim());
       else reject(new Error('claude exit ' + code + ': ' + err.substring(0, 300)));
     });
-    proc.on('error', e => reject(new Error('spawn: ' + e.message)));
+    proc.on('error', e => reject(new Error(
+      'Claude CLI 실행 실패: ' + e.message +
+      ' | CLAUDE_PATH=' + CLAUDE_EXE
+    )));
   });
 }
 
@@ -159,46 +143,39 @@ async function buildPrompt(chatId, currentContent) {
 // --- Process one pending message ---
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id, content = msg.content;
-  console.log('[Worker] Processing msg=' + String(id).substring(0, 8) +
-    '  "' + String(content).substring(0, 60) + '"');
-
+  console.log('[Worker] Processing msg=' + String(id).substring(0, 8) + ' "' + String(content).substring(0, 60) + '"');
   try { await dbUpdate('messages', 'id=eq.' + id, { status: 'processing' }); } catch(e) {}
   await sendHeartbeat();
-
   try {
-    const prompt = await buildPrompt(chat_id, content);
+    const prompt   = await buildPrompt(chat_id, content);
     const response = await runClaude(prompt);
-
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-
     await dbInsert('messages', {
-      id: rid,
-      chat_id: chat_id,
-      role: 'assistant',
-      content: response,
-      status: 'completed',
+      id:         rid,
+      chat_id:    chat_id,
+      role:       'assistant',
+      content:    response,
+      status:     'completed',
       created_at: new Date().toISOString(),
     });
     try { await dbUpdate('messages', 'id=eq.' + id, { status: 'completed' }); } catch(e) {}
     console.log('[Worker] Done -> ' + rid.substring(0, 8) + '...');
-
   } catch (err) {
     console.error('[Worker] Error:', err.message);
     try {
       await dbInsert('messages', {
-        id: 'err-' + Date.now(),
-        chat_id: chat_id,
-        role: 'assistant',
-        content: '[Error] ' + err.message,
-        status: 'error',
+        id:         'err-' + Date.now(),
+        chat_id:    chat_id,
+        role:       'assistant',
+        content:    '⚠️ 오류: ' + err.message,
+        status:     'error',
         created_at: new Date().toISOString(),
       });
       await dbUpdate('messages', 'id=eq.' + id, { status: 'error' });
     } catch(e2) {}
   }
-
   await sendHeartbeat();
 }
 
@@ -206,8 +183,7 @@ async function processMessage(msg) {
 async function poll() {
   if (isProcessing) return;
   try {
-    const rows = await dbSelect('messages',
-      'role=eq.user&status=eq.pending&order=created_at.asc&limit=1');
+    const rows = await dbSelect('messages', 'role=eq.user&status=eq.pending&order=created_at.asc&limit=1');
     if (!rows || rows.length === 0) return;
     isProcessing = true;
     await processMessage(rows[0]);
@@ -220,34 +196,39 @@ async function poll() {
 
 // --- Main ---
 async function main() {
-  console.log('[Relay] Remote Bridge Relay Worker v10');
-  console.log('[Relay] Writes relay-heartbeat + bridge-heartbeat');
+  console.log('[Relay] Remote Bridge Relay Worker v11');
+  console.log('[Relay] Windows claude.cmd PATH 문제 수정 버전');
   console.log('[Relay] Hostname:', HOSTNAME);
   console.log('');
 
+  // FIX: shell: true -> Windows에서 claude.cmd 인식 가능
+  // v10 버그: shell:true 없어서 process.exit(1) 로 즉시 종료됐음
   try {
-    const ver = execSync('claude --version', { stdio: 'pipe' }).toString().trim();
+    const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true }).toString().trim();
     console.log('[OK] Claude CLI:', ver);
+    console.log('[OK] 경로:', CLAUDE_EXE);
   } catch (e) {
-    console.error('[ERROR] Claude CLI not found.');
-    process.exit(1);
+    console.warn('[WARN] claude --version 실패:', e.message.split('\n')[0]);
+    console.warn('[HINT] CMD 창에서 "where claude" 실행 후 경로 확인');
+    console.warn('[HINT] set CLAUDE_PATH=<전체경로\\claude.cmd> 후 재시작');
+    // process.exit(1) 안 함 - 경고만 하고 계속 진행
   }
 
   try {
     await dbSelect('messages', 'limit=1&select=id');
-    console.log('[OK] Supabase connected');
+    console.log('[OK] Supabase 연결 성공');
   } catch (e) {
-    console.error('[ERROR] Supabase failed:', e.message);
+    console.error('[ERROR] Supabase 연결 실패:', e.message);
     process.exit(1);
   }
 
   await sendHeartbeat();
-  console.log('[OK] Heartbeats written (relay + bridge)');
-  console.log('[OK] Ready. Polling every', CONFIG.pollInterval, 'ms...\n');
+  console.log('[OK] 하트비트 전송 완료 (relay + bridge)');
+  console.log('[OK] 폴링 시작 (' + CONFIG.pollInterval + 'ms 간격)...\n');
 
   setInterval(sendHeartbeat, CONFIG.heartbeatInterval);
-  setInterval(handlePings, CONFIG.pollInterval);
-  setInterval(poll, CONFIG.pollInterval);
+  setInterval(handlePings,   CONFIG.pollInterval);
+  setInterval(poll,          CONFIG.pollInterval);
   poll();
   handlePings();
 }
