@@ -1,14 +1,16 @@
 /**
- * Remote Bridge Relay Worker v8
- * - Uses Node.js built-in 'https' module (no SDK, no fetch dependency)
- * - Watches 'messages' table for pending user messages
- * - Uses local Claude CLI (claude --print) via Max plan - no API key needed
+ * Remote Bridge Relay Worker v9
+ * - Fixed heartbeat format: result=timestamp, content='Relay Worker active'
+ * - Handles ping commands (bridge status check)
+ * - Uses Node.js built-in 'https' module (no SDK dependency)
+ * - Uses local Claude CLI (claude --print) via Max plan
  */
 
 const https = require('https');
 const { spawn } = require('child_process');
 const { execSync } = require('child_process');
 const crypto = require('crypto');
+const os = require('os');
 
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
@@ -16,12 +18,13 @@ const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
 const CONFIG = {
   pollInterval: 3000,
   claudeTimeout: 300000,
-  heartbeatInterval: 20000,
+  heartbeatInterval: 15000,
 };
 
 let isProcessing = false;
+const HOSTNAME = os.hostname();
 
-// --- Low-level HTTPS helper ---
+// --- HTTPS helper ---
 function supaReq(method, path, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
@@ -68,15 +71,37 @@ function dbUpsert(table, obj) {
   return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' });
 }
 
-// --- Heartbeat ---
-async function sendHeartbeat(busy) {
+// --- Relay Heartbeat (correct format) ---
+async function sendHeartbeat() {
   try {
     await dbUpsert('commands', {
       id: 'relay-heartbeat',
-      content: busy ? 'busy' : 'idle',
-      status: 'heartbeat',
-      updated_at: new Date().toISOString(),
+      action: 'heartbeat',
+      target: 'relay',
+      content: 'Relay Worker active',
+      status: 'completed',
+      result: new Date().toISOString(),
     });
+  } catch (e) {
+    console.error('[Heartbeat] Error:', e.message);
+  }
+}
+
+// --- Bridge Ping Handler ---
+async function handlePings() {
+  try {
+    const rows = await dbSelect('commands',
+      'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
+    if (!rows || rows.length === 0) return;
+
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+    for (const row of rows) {
+      await dbUpdate('commands', 'id=eq.' + row.id, {
+        status: 'completed',
+        result: 'pong from relay-worker/' + HOSTNAME + ' v9 at ' + now,
+      });
+      console.log('[Ping] Responded to', row.id);
+    }
   } catch (e) { /* silent */ }
 }
 
@@ -118,10 +143,11 @@ async function buildPrompt(chatId, currentContent) {
 // --- Process one pending message ---
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id, content = msg.content;
-  console.log('[Worker] msg=' + String(id).substring(0,8) + ' chat=' + String(chat_id).substring(0,8));
+  console.log('[Worker] msg=' + String(id).substring(0, 8) +
+    '  "' + String(content).substring(0, 60) + '"');
 
   try { await dbUpdate('messages', 'id=eq.' + id, { status: 'processing' }); } catch(e) {}
-  await sendHeartbeat(true);
+  await sendHeartbeat();
 
   try {
     const prompt = await buildPrompt(chat_id, content);
@@ -129,7 +155,7 @@ async function processMessage(msg) {
 
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
-      : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
+      : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
     await dbInsert('messages', {
       id: rid,
@@ -140,7 +166,7 @@ async function processMessage(msg) {
       created_at: new Date().toISOString(),
     });
     try { await dbUpdate('messages', 'id=eq.' + id, { status: 'completed' }); } catch(e) {}
-    console.log('[Worker] OK ->', rid.substring(0,8));
+    console.log('[Worker] Done ->', rid.substring(0, 8) + '...');
 
   } catch (err) {
     console.error('[Worker] Error:', err.message);
@@ -157,7 +183,7 @@ async function processMessage(msg) {
     } catch(e2) {}
   }
 
-  await sendHeartbeat(false);
+  await sendHeartbeat();
 }
 
 // --- Poll ---
@@ -178,8 +204,9 @@ async function poll() {
 
 // --- Main ---
 async function main() {
-  console.log('[Relay] Remote Bridge Relay Worker v8 (https mode)');
-  console.log('[Relay] Max plan (Claude CLI) - no API key, no SDK');
+  console.log('[Relay] Remote Bridge Relay Worker v9');
+  console.log('[Relay] Heartbeat + Ping handler + Claude CLI');
+  console.log('[Relay] Hostname:', HOSTNAME);
   console.log('');
 
   try {
@@ -191,18 +218,22 @@ async function main() {
   }
 
   try {
-    const rows = await dbSelect('messages', 'limit=1&select=id');
-    console.log('[OK] Supabase connected, messages table OK');
+    await dbSelect('messages', 'limit=1&select=id');
+    console.log('[OK] Supabase connected');
   } catch (e) {
     console.error('[ERROR] Supabase failed:', e.message);
     process.exit(1);
   }
 
+  await sendHeartbeat();
+  console.log('[OK] Heartbeat written');
   console.log('[OK] Ready. Polling every', CONFIG.pollInterval, 'ms...\n');
-  await sendHeartbeat(false);
-  setInterval(() => sendHeartbeat(isProcessing), CONFIG.heartbeatInterval);
+
+  setInterval(sendHeartbeat, CONFIG.heartbeatInterval);
+  setInterval(handlePings, CONFIG.pollInterval);
   setInterval(poll, CONFIG.pollInterval);
   poll();
+  handlePings();
 }
 
 main().catch(e => { console.error('[FATAL]', e.message); process.exit(1); });
