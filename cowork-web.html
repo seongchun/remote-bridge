@@ -963,16 +963,48 @@ async function sendMessage() {
    FILE ATTACH & IMAGE PASTE
 ════════════════════════════════════════ */
 async function handleFileInput(input) {
+  const OFFICE = ['docx','doc','xlsx','xls','pptx','ppt','hwp','hwpx','pdf'];
+  const IMGS   = ['png','jpg','jpeg','gif','webp','bmp'];
   for (const f of input.files) {
     const ext = f.name.split('.').pop().toLowerCase();
-    if (f.type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
+    if (f.type.startsWith('image/') || IMGS.includes(ext)) {
       attachments.push({ type:'image', name:f.name, data: await readDataURL(f) });
+    } else if (OFFICE.includes(ext)) {
+      attachments.push({ type:'file', name:f.name, data:'[추출 중...]' });
+      const idx = attachments.length - 1;
+      renderAttachRow();
+      try {
+        attachments[idx].data = await extractViaLocalBridge(f);
+      } catch(e) {
+        attachments[idx].data = '[파일 읽기 실패 – bridge-agent(포트 7654) 확인]\n' + e.message;
+        toast('⚠️ ' + f.name + ': 브릿지 에이전트 연결 실패');
+      }
     } else {
       try { attachments.push({ type:'file', name:f.name, data: await readText(f) }); }
-      catch { toast('읽기 실패: ' + f.name); }
+      catch { toast('파일 읽기 실패: ' + f.name); }
     }
+    renderAttachRow();
   }
-  input.value = ''; renderAttachRow();
+  input.value = '';
+}
+
+async function extractViaLocalBridge(file) {
+  const ab = await file.arrayBuffer();
+  const u8 = new Uint8Array(ab);
+  let bin = '';
+  for (let i = 0; i < u8.length; i += 8192) {
+    bin += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
+  }
+  const resp = await fetch('http://localhost:7654/extract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: file.name, data: btoa(bin) }),
+    signal: AbortSignal.timeout(60000)
+  });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const json = await resp.json();
+  if (json.error) throw new Error(json.error);
+  return json.text;
 }
 function readDataURL(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); }); }
 function readText(f)    { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsText(f,'UTF-8'); }); }
