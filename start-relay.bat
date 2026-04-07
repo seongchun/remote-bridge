@@ -1,7 +1,7 @@
 @echo off
 chcp 65001 >/dev/null
 title Remote Bridge Relay Worker
-color 0B
+color 0A
 
 echo.
 echo ================================================
@@ -9,67 +9,64 @@ echo   Remote Bridge Relay Worker - Home PC
 echo ================================================
 echo.
 
-:: ─────────────────────────────────────────────────
-::  ANTHROPIC API KEY%설정
-:: 이 관이록 스화 있으면 건너뜁니다.
-:: ─────────────────────────────────────────────────
+:: ANTHROPIC API KEY CHECK
 if "%ANTHROPIC_API_KEY%"=="" (
-  echo [API KEY] ANTHROPIC_API_KEY 가 설정되지 않았습니다.
-  set /p ANTHROPIC_API_KEY=  API Key 입력 (sk-ant-...): 
+  echo [API KEY] ANTHROPIC_API_KEY is not set.
+  set /p ANTHROPIC_API_KEY=  Enter API Key (sk-ant-...): 
   echo.
 )
 
 if "%ANTHROPIC_API_KEY%"=="" (
-  echo [ERROR] API Key 를 입력하지 않았습니다. 종료합니다.
+  echo [ERROR] No API Key entered. Exiting.
   pause
   exit /b 1
 )
 
-echo [OK] ANTHROPIC_API_KEY 확인됨.
+echo [OK] ANTHROPIC_API_KEY confirmed.
 echo.
 
-:: CoworkRelay 폴더 확인
+:: Check CoworkRelay directory
 set RELAY_DIR=%USERPROFILE%\CoworkRelay
 if not exist "%RELAY_DIR%" (
-  echo [ERROR] %RELAY_DIR% 폴더가 없습니다.
-  echo setup-home.bat 을 먼저 실행하세요.
+  echo [ERROR] %RELAY_DIR% not found.
+  echo Please run setup-home.bat first.
   pause
   exit /b 1
 )
 
 cd /d "%RELAY_DIR%"
 
-:: Bridge Dashboard 자동 오픈
+:: Open Bridge Dashboard
 if exist "bridge-dashboard.html" (
-  echo [INFO] Bridge Dashboard 열는 중...
+  echo [INFO] Opening Bridge Dashboard...
   start "" "bridge-dashboard.html"
 ) else (
-  echo [INFO] Dashboard 파일 없음. GitHub Pages 에서 열기...
+  echo [INFO] Dashboard not found. Opening GitHub Pages...
   start "" "https://seongchun.github.io/remote-bridge/bridge-dashboard.html"
 )
 
-:: Node.js 확인
+:: Check Node.js
 where node >/dev/null 2>/dev/null
 if errorlevel 1 (
-  echo [ERROR] Node.js 가 설치되지 않았습니다.
-  echo https://nodejs.org 에서 설치하세요.
+  echo [ERROR] Node.js not found.
+  echo Please install from https://nodejs.org
   pause
   exit /b 1
 )
 
-:: relay-worker.js 확인
+:: Check relay-worker.js
 if not exist "relay-worker.js" (
-  echo [ERROR] relay-worker.js 가 없습니다.
+  echo [ERROR] relay-worker.js not found.
   pause
   exit /b 1
 )
 
-echo [INFO] Relay Worker 시작 중...
-echo [INFO] 종료하려면 이 창을 닫거나 Ctrl+C 를 누르세요.
+echo [INFO] Starting Relay Worker...
+echo [INFO] Press Ctrl+C to stop.
 echo.
 
 node relay-worker.js
 
 echo.
-echo [INFO] Relay Worker 종료됨.
+echo [INFO] Relay Worker stopped.
 pause
