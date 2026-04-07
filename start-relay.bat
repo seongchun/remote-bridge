@@ -2,12 +2,13 @@
 chcp 65001 >nul
 title Remote Bridge Relay Worker
 color 0A
-echo.
+
 echo ================================================
 echo   Remote Bridge Relay Worker - Home PC
 echo ================================================
 echo.
 echo [INFO] Uses local Claude (Max plan) - no API key needed.
+echo [INFO] Auto-restarts if relay crashes.
 echo.
 
 set RELAY_DIR=%USERPROFILE%\CoworkRelay
@@ -31,21 +32,28 @@ exit /b 1
 where claude >nul 2>nul
 if not errorlevel 1 goto claude_ok
 echo [ERROR] Claude CLI not found.
-echo Please install Claude Code from https://claude.ai/download
+echo Please install Claude Code first.
 pause
 exit /b 1
 
 :claude_ok
-if exist "relay-worker.js" goto run
-echo [ERROR] relay-worker.js not found.
-pause
-exit /b 1
+echo [INFO] Downloading latest relay-worker.js from GitHub...
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/seongchun/remote-bridge/main/relay-worker.js' -OutFile 'relay-worker.js' -UseBasicParsing" >nul 2>nul
+if errorlevel 1 (
+  echo [WARN] Download failed - using existing relay-worker.js
+) else (
+  echo [OK] relay-worker.js updated.
+)
+echo.
 
-:run
-echo [OK] Starting Relay Worker...
+echo [OK] Starting relay worker with auto-restart...
 echo [INFO] Press Ctrl+C to stop.
 echo.
+
+:restart
+echo [%date% %time%] Starting relay-worker.js...
 node relay-worker.js
 echo.
-echo [INFO] Relay Worker stopped.
-pause
+echo [%date% %time%] Relay worker stopped. Restarting in 3 seconds...
+timeout /t 3 /nobreak >nul
+goto restart
