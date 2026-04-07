@@ -932,7 +932,7 @@ async function sendMessage() {
   const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
   /* Optimistic UI */
-  appendMsg({ id: msgId+'-ui', role:'user', content:text,
+  appendMsg({ id: msgId, role:'user', content:text,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
