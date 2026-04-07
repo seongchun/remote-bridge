@@ -1,5 +1,5 @@
 @echo off
-chcp 65001 >/dev/null
+chcp 65001 >nul
 title Remote Bridge Relay Worker
 color 0A
 
@@ -9,7 +9,6 @@ echo   Remote Bridge Relay Worker - Home PC
 echo ================================================
 echo.
 
-:: ANTHROPIC API KEY CHECK
 if "%ANTHROPIC_API_KEY%"=="" (
   echo [API KEY] ANTHROPIC_API_KEY is not set.
   set /p ANTHROPIC_API_KEY=  Enter API Key (sk-ant-...): 
@@ -25,7 +24,6 @@ if "%ANTHROPIC_API_KEY%"=="" (
 echo [OK] ANTHROPIC_API_KEY confirmed.
 echo.
 
-:: Check CoworkRelay directory
 set RELAY_DIR=%USERPROFILE%\CoworkRelay
 if not exist "%RELAY_DIR%" (
   echo [ERROR] %RELAY_DIR% not found.
@@ -36,17 +34,15 @@ if not exist "%RELAY_DIR%" (
 
 cd /d "%RELAY_DIR%"
 
-:: Open Bridge Dashboard
 if exist "bridge-dashboard.html" (
   echo [INFO] Opening Bridge Dashboard...
   start "" "bridge-dashboard.html"
 ) else (
-  echo [INFO] Dashboard not found. Opening GitHub Pages...
+  echo [INFO] Opening GitHub Pages dashboard...
   start "" "https://seongchun.github.io/remote-bridge/bridge-dashboard.html"
 )
 
-:: Check Node.js
-where node >/dev/null 2>/dev/null
+where node >nul 2>nul
 if errorlevel 1 (
   echo [ERROR] Node.js not found.
   echo Please install from https://nodejs.org
@@ -54,7 +50,6 @@ if errorlevel 1 (
   exit /b 1
 )
 
-:: Check relay-worker.js
 if not exist "relay-worker.js" (
   echo [ERROR] relay-worker.js not found.
   pause
