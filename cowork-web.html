@@ -1249,8 +1249,11 @@ function lightbox(src) {
 function setupInput() {
   const inp = document.getElementById('msgInput');
   inp.addEventListener('keydown', e => {
-    if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); if(!e.isComposing) sendMessage(); }
-  });
+      if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); }
+    });
+    inp.addEventListener('keyup', e => {
+      if (e.key==='Enter' && !e.shiftKey && !e.isComposing) { sendMessage(); }
+    });
   inp.addEventListener('input', autoResize);
 }
 function autoResize() {
