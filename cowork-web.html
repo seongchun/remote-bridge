@@ -921,35 +921,41 @@ async function sendMessage() {
   if (!text && !attachments.length) return;
   if (!chatId) return;
   if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
-  // Guard: block send while file extraction is still pending
-  if (attachments.some(a => a.data === '[추출 중...]')) {
-    toast('⏳ 파일 추출 중입니다. 잠시 후 전송해주세요.');
-    return;
-  }
-  // Guard: block send if extraction failed completely  
-  if (attachments.some(a => a.type === 'file' && a.data.startsWith('[파일 읽기 실패'))) {
-    const proceed = confirm('파일 추출에 실패했습니다. 파일 내용 없이 전송하시겠습니까?');
-    if (!proceed) return;
-  }
 
   /* Build full content */
   let full = text;
-  const imgs  = attachments.filter(a => a.type === 'image');
-  const files = attachments.filter(a => a.type === 'file');
-  if (imgs.length)  full += '\n\n[첨부 이미지 ' + imgs.length + '개: ' + imgs.map(a=>a.name).join(', ') + ']';
-  if (files.length) full += '\n\n[첨부 파일]\n' + files.map(a=>`파일명: ${a.name}\n${a.data}`).join('\n\n---\n\n');
+  const imgs    = attachments.filter(a => a.type === 'image');
+  const files   = attachments.filter(a => a.type === 'file');
+  const offices = attachments.filter(a => a.type === 'office');
 
-  const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+  if (files.length) {
+    full += '\n\n--- 첨부 파일 내용 ---\n';
+    files.forEach(f => {
+      full += `\n[${f.name}]\n${f.data}\n`;
+    });
+  }
 
-  /* Optimistic UI */
-  appendMsg({ id: msgId, role:'user', content:text,
-    attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})) });
+  /* Embed office files as base64 markers for relay extraction */
+  if (offices.length) {
+    offices.forEach(f => {
+      full += `\n[ATTACHED_FILE:${f.name}]\n${f.data}\n[/ATTACHED_FILE]\n`;
+    });
+  }
 
-  document.getElementById('chatWelcome').style.display = 'none';
-  document.getElementById('msgContainer').style.display = 'flex';
+  /* Auto title */
+  if (!msgCount) {
+    let title = text.substring(0, 40);
+    if (!title && attachments.length) title = '파일 분석';
+    document.getElementById('chats').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = title;
+    await sb.from('chats').update({title}).eq('id', chatId);
+    chatIndex[chatId].title = title;
+  }
+  const msgId = 'msg-' + Date.now();
+  msgCount++;
+  addBubble({role:'user', content:full, images: imgs.map(i => i.data)});
 
-  const title = text.slice(0,30) + (text.length>30?'...':'') || '[파일 첨부]';
-  upsertHistory(chatId, title);
+  let title = document.getElementById('chatTitle').textContent;
+  if (msgCount > 1) title = text.substring(0, 40) || title;
   document.getElementById('chatTitle').textContent = title;
 
   inp.value = ''; autoResize();
@@ -960,63 +966,48 @@ async function sendMessage() {
 
   try {
     const _md={id:msgId,chat_id:chatId,role:'user',content:full,status:'pending'};
-    if(imgs.length>0)_md.attachments=imgs.map(a=>({type:'image',name:a.name,data:a.data}));
-    await sp('messages',_md);
-    startPolling(2000);
+    if (imgs.length) _md.images = imgs.map(i => i.data);
+    await sb.from('messages').insert(_md);
   } catch(e) {
+    console.error('Send error', e);
     toast('전송 실패: ' + e.message);
     setWaiting(false);
   }
 }
 
-/* ════════════════════════════════════════
-   FILE ATTACH & IMAGE PASTE
-════════════════════════════════════════ */
 async function handleFileInput(input) {
-  const OFFICE = ['docx','doc','xlsx','xls','pptx','ppt','hwp','hwpx','pdf'];
-  const IMGS   = ['png','jpg','jpeg','gif','webp','bmp'];
-  for (const f of input.files) {
-    const ext = f.name.split('.').pop().toLowerCase();
-    if (f.type.startsWith('image/') || IMGS.includes(ext)) {
-      attachments.push({ type:'image', name:f.name, data: await readDataURL(f) });
-    } else if (OFFICE.includes(ext)) {
-      attachments.push({ type:'file', name:f.name, data:'[추출 중...]' });
-      const idx = attachments.length - 1;
-      renderAttachRow();
-      try {
-        attachments[idx].data = await extractViaLocalBridge(f);
-      } catch(e) {
-        attachments[idx].data = '[파일 읽기 실패 – bridge-agent(포트 7654) 확인]\n' + e.message;
-        toast('⚠️ ' + f.name + ': 브릿지 에이전트 연결 실패');
+      const OFFICE = ['docx','doc','xlsx','xls','pptx','ppt','hwp','hwpx','pdf'];
+      const IMGS = ['png','jpg','jpeg','gif','webp','bmp'];
+      const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB limit
+      for (const f of input.files) {
+        const ext = f.name.split('.').pop().toLowerCase();
+        if (f.size > MAX_FILE_SIZE) {
+          toast('파일이 너무 큽니다 (3MB 초과): ' + f.name);
+          continue;
+        }
+        if (f.type.startsWith('image/') || IMGS.includes(ext)) {
+          attachments.push({ type:'image', name:f.name, data: await readDataURL(f) });
+        } else if (OFFICE.includes(ext)) {
+          // Read raw file bytes as base64 - relay will extract content on home PC
+          const ab = await f.arrayBuffer();
+          const u8 = new Uint8Array(ab);
+          let bin = '';
+          for (let i = 0; i < u8.length; i += 8192) {
+            bin += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
+          }
+          const b64 = btoa(bin);
+          attachments.push({ type:'office', name:f.name, data:b64, size:f.size });
+          toast('첨부 완료: ' + f.name + ' (' + Math.round(f.size/1024) + 'KB)');
+        } else {
+          try { attachments.push({ type:'file', name:f.name, data: await readText(f) }); }
+          catch { toast('파일 읽기 실패: ' + f.name); }
+        }
+        renderAttachRow();
       }
-    } else {
-      try { attachments.push({ type:'file', name:f.name, data: await readText(f) }); }
-      catch { toast('파일 읽기 실패: ' + f.name); }
+      input.value = '';
     }
-    renderAttachRow();
-  }
-  input.value = '';
-}
 
-async function extractViaLocalBridge(file) {
-  const ab = await file.arrayBuffer();
-  const u8 = new Uint8Array(ab);
-  let bin = '';
-  for (let i = 0; i < u8.length; i += 8192) {
-    bin += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
-  }
-  const resp = await fetch('http://localhost:7654/extract', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: file.name, data: btoa(bin) }),
-    signal: AbortSignal.timeout(30000)
-  });
-  if (!resp.ok) throw new Error('HTTP ' + resp.status);
-  const json = await resp.json();
-  if (json.error) throw new Error(json.error);
-  return json.text;
-}
-function readDataURL(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); }); }
+    function readDataURL(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); }); }
 function readText(f)    { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsText(f,'UTF-8'); }); }
 
 document.addEventListener('paste', async e => {
