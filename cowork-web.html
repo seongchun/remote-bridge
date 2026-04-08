@@ -11,7 +11,7 @@
   --bg1: #1f1f1f;
   --bg2: #262626;
   --bg3: #303030;
-  --bg4: #3a3a3a;
+  --bg4: #3a3a3a;h
   --text1: #f0f0ef;
   --text2: #b0afa8;
   --text3: #6b6b6b;
@@ -1009,7 +1009,7 @@ async function extractViaLocalBridge(file) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: file.name, data: btoa(bin) }),
-    signal: AbortSignal.timeout(10000)
+    signal: AbortSignal.timeout(30000)
   });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const json = await resp.json();
