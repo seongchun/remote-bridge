@@ -50,6 +50,32 @@ if not exist "%USERPROFILE%\CoworkRelay" (
 )
 cd /d "%USERPROFILE%\CoworkRelay"
 
+:: Check Python (required for markitdown file extraction)
+where python >nul 2>nul
+if errorlevel 1 (
+  where python3 >nul 2>nul
+  if errorlevel 1 (
+    echo [WARN] Python not found - file extraction will not work
+    echo Install from https://python.org
+  )
+)
+
+:: Check/Install markitdown
+echo [Check] markitdown...
+pip show markitdown >nul 2>nul
+if errorlevel 1 (
+  echo [Install] Installing markitdown for office file extraction...
+  pip install markitdown --quiet 2>nul
+  if errorlevel 1 (
+    python -m pip install markitdown --quiet 2>nul
+    if errorlevel 1 (
+      echo [WARN] markitdown install failed - office file extraction may not work
+    )
+  )
+) else (
+  echo [OK] markitdown installed
+)
+
 :: Download latest relay-worker.js from GitHub
 echo [INFO] Downloading latest relay-worker.js...
 powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/seongchun/remote-bridge/main/relay-worker.js' -OutFile 'relay-worker.js' -UseBasicParsing; Write-Host '[OK] relay-worker.js updated' } catch { Write-Host '[WARN] Download failed, using cached version' }"
