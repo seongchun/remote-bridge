@@ -1,5 +1,6 @@
 /**
- * Remote Bridge Relay Worker v13
+ * Remote Bridge Relay Worker v14
+ * NEW: markitdown 기반 첨부파일 추출 (Cowork 동일 방식)
  * FIX 1: 시작 시 'processing' 메시지를 'pending'으로 자동 복구
  * FIX 2: claude --print 프롬프트를 임시파일로 전달 (한글/특수문자 안전)
  * FIX 3: shell:true + CLAUDE_PATH 환경변수 지원
@@ -155,27 +156,95 @@ async function buildPrompt(chatId, content) {
   } catch(e) { return content; }
 }
 
+/**
+ * Extract attached files from message content using markitdown
+ * Parses [ATTACHED_FILE:filename]base64data[/ATTACHED_FILE] markers
+ * Saves to temp, runs markitdown, replaces marker with extracted text
+ */
+async function extractAttachedFiles(content) {
+  const regex = /\[ATTACHED_FILE:([^\]]+)\]\n([\s\S]*?)\n\[\/ATTACHED_FILE\]/g;
+  let match;
+  const files = [];
+  while ((match = regex.exec(content)) !== null) {
+    files.push({ name: match[1], data: match[2], fullMatch: match[0] });
+  }
+  if (files.length === 0) return content;
+
+  let result = content;
+  for (const f of files) {
+    console.log('[Extract] Processing: ' + f.name + ' (' + Math.round(f.data.length * 0.75 / 1024) + 'KB)');
+    const tmpDir = path.join(os.tmpdir(), 'relay-files-' + Date.now());
+    try { fs.mkdirSync(tmpDir, { recursive: true }); } catch(e) {}
+    const tmpPath = path.join(tmpDir, f.name);
+    try {
+      // Decode base64 and save to temp file
+      const buf = Buffer.from(f.data, 'base64');
+      fs.writeFileSync(tmpPath, buf);
+
+      // Try markitdown first
+      let extracted = '';
+      try {
+        extracted = execSync('markitdown "' + tmpPath + '"', {
+          timeout: 60000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024
+        }).trim();
+      } catch(e1) {
+        // Fallback: try python -m markitdown
+        try {
+          extracted = execSync('python -m markitdown "' + tmpPath + '"', {
+            timeout: 60000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024
+          }).trim();
+        } catch(e2) {
+          try {
+            extracted = execSync('python3 -m markitdown "' + tmpPath + '"', {
+              timeout: 60000, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024
+            }).trim();
+          } catch(e3) {
+            console.error('[Extract] markitdown failed for ' + f.name + ':', e3.message);
+            extracted = '[파일 추출 실패: ' + f.name + ' - markitdown 미설치 또는 오류]';
+          }
+        }
+      }
+
+      // Replace the marker with extracted content
+      const replacement = '\n--- 첨부파일: ' + f.name + ' ---\n' + extracted + '\n--- 끝: ' + f.name + ' ---\n';
+      result = result.replace(f.fullMatch, replacement);
+      console.log('[Extract] Done: ' + f.name + ' -> ' + extracted.length + ' chars');
+    } catch(e) {
+      console.error('[Extract] Error processing ' + f.name + ':', e.message);
+      result = result.replace(f.fullMatch, '\n[파일 처리 오류: ' + f.name + ']\n');
+    } finally {
+      // Cleanup
+      try { fs.unlinkSync(tmpPath); } catch(e) {}
+      try { fs.rmdirSync(tmpDir); } catch(e) {}
+    }
+  }
+  return result;
+}
+
 async function processMessage(msg) {
   const { id, chat_id, content } = msg;
-  console.log('[Worker]', id.slice(0,8), '"' + (content||'').slice(0,50) + '"');
+  console.log('[Worker] msg=' + id.slice(0,16) + ' len=' + content.length);
   try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'processing' }); } catch(e) {}
   await sendHeartbeat();
   try {
-    const prompt = await buildPrompt(chat_id, content);
+    // v14: Extract attached files using markitdown before building prompt
+    const processedContent = await extractAttachedFiles(content);
+    const prompt = await buildPrompt(chat_id, processedContent);
     const response = await runClaude(prompt);
     console.log('[Worker] 응답:', response.slice(0,60));
-    const rid = typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2,8);
-    await dbInsert('messages', { id: rid, chat_id, role: 'assistant', content: response, status: 'completed', created_at: new Date().toISOString() });
-    try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
-    console.log('[Worker] 완료 ->', rid.slice(0,8));
-  } catch(err) {
-    console.error('[Worker] 오류:', err.message);
-    try {
-      await dbInsert('messages', { id: 'err-' + Date.now(), chat_id, role: 'assistant', content: '⚠️ 오류: ' + err.message, status: 'error', created_at: new Date().toISOString() });
-      await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' });
-    } catch(e2) {}
+    const replyId = 'rep-' + Date.now();
+    await dbInsert('messages', {
+      id: replyId, chat_id, role: 'assistant',
+      content: response, status: 'completed'
+    });
+    await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' });
+  } catch(e) {
+    console.error('[Worker] Error:', e.message);
+    await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), {
+      status: 'error',
+      content: '[오류] ' + e.message
+    });
   }
-  await sendHeartbeat();
 }
 
 async function poll() {
@@ -190,7 +259,7 @@ async function poll() {
 }
 
 async function main() {
-  console.log('[Relay] Remote Bridge Relay Worker v12');
+  console.log('[Relay] Remote Bridge Relay Worker v14');
   console.log('[Relay] Hostname:', HOSTNAME); console.log('');
 
   try {
