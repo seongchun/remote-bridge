@@ -197,11 +197,15 @@ while ($listener.IsListening) {
             $result = '{"error":"not found"}'
         }
 
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($result)
-        $resp.ContentType = "application/json; charset=utf-8"
-        $resp.ContentLength64 = $bytes.Length
-        $resp.OutputStream.Write($bytes, 0, $bytes.Length)
-        $resp.Close()
+        try {
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($result)
+            $resp.ContentType = "application/json; charset=utf-8"
+            $resp.ContentLength64 = $bytes.Length
+            $resp.OutputStream.Write($bytes, 0, $bytes.Length)
+            $resp.Close()
+        } catch {
+            Log "Response write failed (client may have disconnected)"
+        }
 
     } catch [System.Net.HttpListenerException] {
         break  # Listener stopped
