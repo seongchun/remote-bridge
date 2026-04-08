@@ -7,14 +7,14 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <style>
 :root {
-  --bg0: #1a1a1a;
-  --bg1: #1f1f1f;
-  --bg2: #262626;
-  --bg3: #303030;
-  --bg4: #3a3a3a;h
-  --text1: #f0f0ef;
-  --text2: #b0afa8;
-  --text3: #6b6b6b;
+  --bg0: #f5f4ef;
+  --bg1: #ffffff;
+  --bg2: #ece9e1;
+  --bg3: #e5e2da;
+  --bg4: #d6d3cb;
+  --text1: #1a1a1a;
+  --text2: #6b6560;
+  --text3: #a39e96;
   --accent: #d97706;
   --accent2: #b45309;
   --blue: #2563eb;
@@ -22,7 +22,7 @@
   --green: #22c55e;
   --red: #ef4444;
   --orange: #f59e0b;
-  --border: #2a2a2a;
+  --border: #ddd9d0;
   --sidebar-w: 210px;
   --right-w: 272px;
   --radius: 12px;
@@ -341,7 +341,7 @@ body {
   gap: 5px;
   padding: 5px 10px;
   border-radius: 8px;
-  background: rgba(255,255,255,.1);
+  background: rgba(0,0,0,0.12);
   margin-bottom: 6px;
   font-size: 12px;
 }
@@ -419,7 +419,7 @@ body {
   display: flex;
   align-items: flex-end;
   gap: 8px;
-  background: var(--bg2);
+  background: var(--bg1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 8px 10px;
@@ -527,7 +527,7 @@ body {
   line-height: 1.4;
   transition: background .1s;
 }
-.step-item.active { color: var(--text1); background: rgba(255,255,255,.04); }
+.step-item.active { color: var(--text1); background: rgba(0,0,0,0.10); }
 .step-icon { flex-shrink: 0; width: 14px; text-align: center; margin-top: 1px; font-size: 11px; }
 .step-text { flex: 1; word-break: break-all; }
 .step-empty { padding: 6px 14px; font-size: 11.5px; color: var(--text3); }
@@ -1282,12 +1282,12 @@ function lightbox(src) {
 function setupInput() {
   const inp = document.getElementById('msgInput');
   inp.addEventListener('keydown', e => {
-      if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); }
+      if (e.key==='Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        sendMessage();
+      }
     });
-    inp.addEventListener('keyup', e => {
-      if (e.key==='Enter' && !e.shiftKey && !e.isComposing) { sendMessage(); }
-    });
-  inp.addEventListener('input', autoResize);
+    inp.addEventListener('input', autoResize);
 }
 function autoResize() {
   const inp = document.getElementById('msgInput');
