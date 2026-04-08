@@ -921,6 +921,16 @@ async function sendMessage() {
   if (!text && !attachments.length) return;
   if (!chatId) return;
   if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
+  // Guard: block send while file extraction is still pending
+  if (attachments.some(a => a.data === '[추출 중...]')) {
+    toast('⏳ 파일 추출 중입니다. 잠시 후 전송해주세요.');
+    return;
+  }
+  // Guard: block send if extraction failed completely  
+  if (attachments.some(a => a.type === 'file' && a.data.startsWith('[파일 읽기 실패'))) {
+    const proceed = confirm('파일 추출에 실패했습니다. 파일 내용 없이 전송하시겠습니까?');
+    if (!proceed) return;
+  }
 
   /* Build full content */
   let full = text;
@@ -999,7 +1009,7 @@ async function extractViaLocalBridge(file) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name: file.name, data: btoa(bin) }),
-    signal: AbortSignal.timeout(60000)
+    signal: AbortSignal.timeout(10000)
   });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const json = await resp.json();
