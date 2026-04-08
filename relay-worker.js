@@ -1,5 +1,5 @@
 /**
- * Remote Bridge Relay Worker v12
+ * Remote Bridge Relay Worker v13
  * FIX 1: 시작 시 'processing' 메시지를 'pending'으로 자동 복구
  * FIX 2: claude --print 프롬프트를 임시파일로 전달 (한글/특수문자 안전)
  * FIX 3: shell:true + CLAUDE_PATH 환경변수 지원
@@ -24,7 +24,40 @@ const CONFIG = {
 
 let isProcessing = false;
 const HOSTNAME = os.hostname();
-const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
+// Auto-detect Claude CLI location
+function findClaude() {
+  if (process.env.CLAUDE_PATH) {
+    try { fs.accessSync(process.env.CLAUDE_PATH); return process.env.CLAUDE_PATH; } catch(e) {}
+  }
+  // Try 'where' command (Windows) or 'which' (Linux/Mac)
+  const whichCmd = os.platform() === 'win32' ? 'where' : 'which';
+  for (const name of ['claude.cmd', 'claude.bat', 'claude.exe', 'claude']) {
+    try {
+      const p = execSync(whichCmd + ' ' + name, { stdio: 'pipe', shell: true }).toString().trim().split('\n')[0].trim();
+      if (p) return p;
+    } catch(e) {}
+  }
+  // Search common Windows paths
+  if (os.platform() === 'win32') {
+    const home = process.env.USERPROFILE || process.env.HOME || '';
+    const ad = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
+    const lad = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    const candidates = [
+      path.join(ad, 'npm', 'claude.cmd'),
+      path.join(ad, 'npm', 'node_modules', '.bin', 'claude.cmd'),
+      path.join(lad, 'Programs', 'claude', 'claude.exe'),
+      path.join(lad, 'AnthropicClaude', 'claude.exe'),
+      path.join(home, '.claude', 'local', 'claude.exe'),
+      'C:\\Program Files\\Claude\\claude.exe',
+      'C:\\Program Files\\Anthropic\\claude.exe',
+    ];
+    for (const c of candidates) {
+      try { fs.accessSync(c); return c; } catch(e) {}
+    }
+  }
+  return 'claude'; // fallback
+}
+const CLAUDE_EXE = findClaude();
 
 function supaReq(method, spath, body, extraHeaders) {
   return new Promise((resolve, reject) => {
