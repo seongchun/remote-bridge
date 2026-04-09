@@ -639,7 +639,36 @@ body {
     .thinking-dots span:nth-child(3) { animation-delay:0.4s; }
     @keyframes dotPulse { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
     .msg-attach-row { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
-    </style>
+    
+.file-download-btn {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  background:var(--accent);
+  color:white;
+  border:none;
+  border-radius:8px;
+  padding:6px 12px;
+  font-size:12px;
+  cursor:pointer;
+  text-decoration:none;
+  margin:2px;
+  transition:background 0.2s;
+}
+.file-download-btn:hover {
+  background:var(--accent2);
+}
+.file-download-btn .dl-icon {
+  font-size:14px;
+}
+.file-download-btn .dl-text {
+  font-weight: 500;
+}
+.file-download-btn .dl-name {
+  font-size:11px;
+  opacity:0.9;
+}
+</style>
 </head>
 <body>
 
@@ -936,120 +965,110 @@ async function sendMessage() {
   const inp  = document.getElementById('msgInput');
   const text = inp.value.trim();
   if (!text && !attachments.length) return;
-  if (!chatId) createNewChat();
+  if (!chatId) return;
   if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
 
-  /* Build full content for transmission (includes file data) */
-  let full = text;
-  const imgs    = attachments.filter(a => a.type === 'image');
-  const files   = attachments.filter(a => a.type === 'file');
-  const offices = attachments.filter(a => a.type === 'office');
+  const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
-  if (files.length) {
-    full += '\n\n--- 첨부 파일 내용 ---\n';
-    files.forEach(f => { full += `\n[${f.name}]\n${f.data}\n`; });
-  }
-  if (offices.length) {
-    offices.forEach(f => {
-      full += `\n[ATTACHED_FILE:${f.name}]\n${f.data}\n[/ATTACHED_FILE]\n`;
-    });
-  }
-
-  /* ===== UI first (before any await) ===== */
-  const msgId = 'msg-' + Date.now();
-  const isFirst = !msgCount;
-  msgCount++;
-
-  /* Build attachment metadata for display (NOT raw data) */
-  const attMeta = [];
-  files.forEach(f => attMeta.push({ type:'file', name:f.name }));
-  offices.forEach(f => attMeta.push({ type:'office', name:f.name, size:f.size }));
+  /* Optimistic UI */
+  const imgs  = attachments.filter(a => a.type === 'image');
+  const fileAtts = attachments.filter(a => a.type === 'file');
+  appendMsg({ id: msgId+'-ui', role:'user', content: text || '파일 분석 요청',
+    attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
+    files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
 
-  /* Display ONLY user text + file chips (no raw data) */
-  appendMsg({id: msgId, role:'user', content: text || '파일 분석 요청', attachments: attMeta, images: imgs.map(i => i.data)});
-
-  let autoTitle = text.substring(0, 40) || '파일 분석';
-  document.getElementById('chatTitle').textContent = autoTitle;
+  const title = text.slice(0,30) + (text.length>30?'...':'') || '[파일 첨부]';
+  upsertHistory(chatId, title);
+  document.getElementById('chatTitle').textContent = title;
 
   inp.value = ''; autoResize();
-  const savedAtt = [...attachments];
+  const savedAttachments = [...attachments];
   attachments = []; renderAttachRow();
   setWaiting(true); resetProgress();
-
-  /* Show upload/thinking status */
-  if (attMeta.length) showThinkingStatus('파일 업로드 중...');
   scrollBot();
 
-  /* ===== Async Supabase ops (after UI is done) ===== */
   try {
-    if (isFirst) {
-      try { document.getElementById('chatList').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = autoTitle; } catch(e) {}
-      await sb.from('chats').update({title: autoTitle}).eq('id', chatId);
-      try { chatIndex[chatId].title = autoTitle; } catch(e) {}
+    /* STEP 1: Upload files to Supabase Storage */
+    const fileRefs = [];
+    const filesToUpload = savedAttachments.filter(a => a.type === 'file');
+
+    if (filesToUpload.length > 0) {
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const att = filesToUpload[i];
+        toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
+
+        const timestamp = Date.now();
+        const path = chatId + '/' + timestamp + '-' + att.name;
+
+        try {
+          const uploadRes = await sb.storage.from('files').upload(path, att.file);
+          if (uploadRes.error) throw uploadRes.error;
+
+          const urlRes = sb.storage.from('files').getPublicUrl(path);
+          const url = urlRes.data ? urlRes.data.publicUrl : '';
+
+          fileRefs.push({
+            name: att.name,
+            path: path,
+            size: att.size,
+            type: att.type,
+            url: url
+          });
+        } catch (e) {
+          toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
+          setWaiting(false);
+          return;
+        }
+      }
     }
 
-    /* Check payload size */
-    const payloadSize = new Blob([full]).size;
-    console.log('Payload size:', Math.round(payloadSize/1024) + 'KB');
+    /* STEP 2: Insert message with file metadata only */
+    const messageData = {
+      id: msgId,
+      chat_id: chatId,
+      role: 'user',
+      content: text || '파일 분석 요청',
+      status: 'pending',
+      files: fileRefs.length > 0 ? fileRefs : null
+    };
 
-    if (payloadSize > 3 * 1024 * 1024) {
-      toast('⚠️ 파일이 너무 큽니다 (' + Math.round(payloadSize/1024/1024) + 'MB)');
-      full = text + '\n\n[첨부파일 크기 초과: ' + [...files,...offices].map(f=>f.name).join(', ') + ']';
-    }
-
-    if (attMeta.length) showThinkingStatus('서버로 전송 중...');
-
-    const _md = {id:msgId, chat_id:chatId, role:'user', content:full, status:'pending'};
-    if (imgs.length) _md.images = imgs.map(i => i.data);
-    const res = await sb.from('messages').insert(_md);
-    if (res.error) throw res.error;
-
-    if (attMeta.length) showThinkingStatus('전송 완료 — 응답 대기 중...');
-    else showThinkingStatus('응답 대기 중...');
-
-    console.log('Message sent:', msgId);
+    await sp('messages', messageData);
+    startPolling(2000);
   } catch(e) {
-    console.error('Send error', e);
     toast('전송 실패: ' + e.message);
-    hideThinkingStatus();
     setWaiting(false);
   }
 }
 
 async function handleFileInput(input) {
-      const OFFICE = ['docx','doc','xlsx','xls','pptx','ppt','hwp','hwpx','pdf'];
-      const IMGS = ['png','jpg','jpeg','gif','webp','bmp'];
-      const MAX_FILE_SIZE = 3 * 1024 * 1024; // 3MB limit
-      for (const f of input.files) {
-        const ext = f.name.split('.').pop().toLowerCase();
-        if (f.size > MAX_FILE_SIZE) {
-          toast('파일이 너무 큽니다 (3MB 초과): ' + f.name);
-          continue;
-        }
-        if (f.type.startsWith('image/') || IMGS.includes(ext)) {
-          attachments.push({ type:'image', name:f.name, data: await readDataURL(f) });
-        } else if (OFFICE.includes(ext)) {
-          // Read raw file bytes as base64 - relay will extract content on home PC
-          const ab = await f.arrayBuffer();
-          const u8 = new Uint8Array(ab);
-          let bin = '';
-          for (let i = 0; i < u8.length; i += 8192) {
-            bin += String.fromCharCode(...u8.subarray(i, Math.min(i + 8192, u8.length)));
-          }
-          const b64 = btoa(bin);
-          attachments.push({ type:'office', name:f.name, data:b64, size:f.size });
-          toast('첨부 완료: ' + f.name + ' (' + Math.round(f.size/1024) + 'KB)');
-        } else {
-          try { attachments.push({ type:'file', name:f.name, data: await readText(f) }); }
-          catch { toast('파일 읽기 실패: ' + f.name); }
-        }
-        renderAttachRow();
+  for (const f of input.files) {
+    const ext = f.name.split('.').pop().toLowerCase();
+    if (f.type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
+      attachments.push({
+        type:'image',
+        name:f.name,
+        data: await readDataURL(f),
+        size: f.size,
+        file: f
+      });
+    } else {
+      try {
+        attachments.push({
+          type:'file',
+          name:f.name,
+          data: await readText(f),
+          size: f.size,
+          file: f
+        });
       }
-      input.value = '';
+      catch { toast('읽기 실패: ' + f.name); }
     }
+  }
+  input.value = ''; renderAttachRow();
+}
 
     function readDataURL(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); }); }
 function readText(f)    { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsText(f,'UTF-8'); }); }
@@ -1138,10 +1157,7 @@ function appendMsg(msg) {
   let grp = document.getElementById('m-' + msg.id);
   if (grp) {
     const mc = grp.querySelector('.mc');
-    if (mc) {
-      let dc = msg.role === 'user' ? stripFileData(msg.content || '') : (msg.content || '');
-      mc.textContent = parseContent(dc);
-    }
+    if (mc) mc.textContent = parseContent(msg.content || '');
     updateProgress(msg); return;
   }
 
@@ -1150,7 +1166,7 @@ function appendMsg(msg) {
     : '';
 
   grp = document.createElement('div');
-  grp.id = 'm-' + msg.id;
+  grp.id   = 'm-' + msg.id;
   grp.className = 'msg-group';
 
   if (msg.role === 'system') {
@@ -1159,49 +1175,37 @@ function appendMsg(msg) {
     const isUser = msg.role === 'user';
     const rowCls = isUser ? 'user-row' : 'ai-row';
     const avCls  = isUser ? 'user-av'  : 'ai-av';
-    const avTxt  = isUser ? 'L#'       : '🔮';
+    const avTxt  = isUser ? '나'        : 'C';
 
-    /* Render attachment chips */
     let att = '';
-    if (msg.images && msg.images.length) {
-      msg.images.forEach(src => {
-        att += `<img class="msg-img" src="${src}" onclick="lightbox('${src}')">`;
-      });
-    }
+
+    /* Render legacy attachments (images) */
     (msg.attachments || []).forEach(a => {
-      if (a.type==='image' && a.data) {
-        att += `<img class="msg-img" src="${a.data}" onclick="lightbox('${a.data}')">`;
+      if (a.type==='image') att += `<img class="msg-img" src="${a.data}" onclick="lightbox('${a.data}')">`;
+      else                  att += `<div class="msg-file-chip">📄 ${esc(a.name)}</div>`;
+    });
+
+    /* Render files from Storage (new msg.files JSONB column) */
+    (msg.files || []).forEach(f => {
+      if (isUser) {
+        att += `<div class="msg-file-chip">📄 ${esc(f.name)}</div>`;
       } else {
-        const icon = a.type==='office' ? '📄' : '📎';
-        const sizeStr = a.size ? ' (' + Math.round(a.size/1024) + 'KB)' : '';
-        att += `<div class="msg-file-chip"><span class="file-icon">${icon}</span><span class="file-name">${esc(a.name)}</span><span class="file-size">${sizeStr}</span></div>`;
+        att += `<a class="file-download-btn" href="${f.url}" target="_blank" download>
+          <span class="dl-icon">⬇️</span>
+          <span class="dl-text">다운로드</span>
+          <span class="dl-name">${esc(f.name)}</span>
+        </a>`;
       }
     });
 
-    /* For user messages loaded from DB: extract file names and strip raw data */
-    let displayContent = msg.content || '';
-    if (isUser) {
-      if (!msg.attachments || !msg.attachments.length) {
-        const extracted = extractFileNames(displayContent);
-        if (extracted.names.length) {
-          extracted.names.forEach(n => {
-            att += `<div class="msg-file-chip"><span class="file-icon">📄</span><span class="file-name">${esc(n)}</span></div>`;
-          });
-        }
-      }
-      displayContent = stripFileData(displayContent);
-    }
-
-    if (att) att = '<div class="msg-attach-row">' + att + '</div>';
-
-    const content = parseContent(displayContent);
+    const content = parseContent(msg.content || '');
     grp.innerHTML = `
       <div class="msg-row ${rowCls}">
         <div class="msg-av ${avCls}">${avTxt}</div>
         <div class="msg-bubble">${att}<div class="mc">${esc(content)}</div></div>
       </div>
-      ${time ? `<div class="msg-time">${time}</div>` : ''}`;
-
+      ${time ? `<div class="msg-time">${time}</div>` : ''}
+    `;
     updateProgress(msg);
     if (!isUser) findFilesInText(content);
   }
@@ -1288,14 +1292,13 @@ async function pollMessages() {
   if (!chatId) return;
   try {
     const msgs = await sgRaw('messages',
-      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at`);
+      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at,attachments,files`);
     let hasNew = false;
     msgs.forEach(m => {
       const ex = document.getElementById('m-'+m.id);
       if (ex) {
         const mc = ex.querySelector('.mc');
-        let dc = m.role === 'user' ? stripFileData(m.content||'') : (m.content||'');
-        const parsed = parseContent(dc);
+        const parsed = parseContent(m.content||'');
         if (mc && mc.textContent !== parsed) { mc.textContent = parsed; scrollBot(); }
         updateProgress(m);
       } else {
@@ -1305,45 +1308,28 @@ async function pollMessages() {
     });
     if (hasNew) {
       scrollBot();
-      hideThinkingStatus();
-    }
-    const last = [...msgs].reverse().find(m=>m.role==='assistant');
-    if (last && (last.status==='completed'||last.status==='error')) {
-      setWaiting(false); startPolling(6000);
-      hideThinkingStatus();
+      const last = [...msgs].reverse().find(m=>m.role==='assistant');
+      if (last && (last.status==='completed'||last.status==='error')) {
+        setWaiting(false); startPolling(5000);
+      }
     }
   } catch(e) { console.error('poll:', e); }
 }
 
 function setupRealtime() {
-  if (rtChannel) { sb.removeChannel(rtChannel); }
+  if (rtChannel) sb.removeChannel(rtChannel);
+  if (!chatId) return;
   rtChannel = sb.channel('rt-'+chatId)
     .on('postgres_changes',
       { event:'*', schema:'public', table:'messages', filter:`chat_id=eq.${chatId}` },
       payload => {
-        const m = payload.new;
-        if (!m) return;
+        const m = payload.new; if (!m) return;
         const ex = document.getElementById('m-'+m.id);
-        if (ex) {
-          const mc = ex.querySelector('.mc');
-          if (mc) {
-            let dc = m.role === 'user' ? stripFileData(m.content||'') : (m.content||'');
-            mc.textContent = parseContent(dc);
-          }
-          updateProgress(m);
-          scrollBot();
-        } else {
-          appendMsg(m);
-          scrollBot();
-        }
-        if (m.role === 'assistant') {
-          hideThinkingStatus();
-          if (m.status === 'completed' || m.status === 'error') {
-            setWaiting(false);
-          } else if (m.status === 'processing') {
-            showThinkingStatus('응답 생성 중...');
-          }
-        }
+        const parsed = parseContent(m.content||'');
+        if (ex) { const mc=ex.querySelector('.mc'); if(mc) mc.textContent=parsed; updateProgress(m); }
+        else appendMsg(m);
+        scrollBot();
+        if (m.role==='assistant' && (m.status==='completed'||m.status==='error')) setWaiting(false);
       })
     .subscribe();
 }
