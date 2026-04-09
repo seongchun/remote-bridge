@@ -994,7 +994,7 @@ async function sendMessage() {
     /* STEP 1: Upload files as base64 chunks via REST API */
     const fileRefs = [];
     const filesToUpload = savedAttachments.filter(a => a.type === 'file');
-    const CHUNK_SIZE = 200000; /* ~200KB per chunk (base64) */
+    const CHUNK_SIZE = 10000; /* ~200KB per chunk (base64) */
 
     for (let i = 0; i < filesToUpload.length; i++) {
       const att = filesToUpload[i];
@@ -1014,14 +1014,27 @@ async function sendMessage() {
 
         for (let ci = 0; ci < totalChunks; ci++) {
           const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
-          await sp('file_chunks', {
-            message_id: msgId,
-            file_name: att.name,
-            chunk_index: ci,
-            total_chunks: totalChunks,
-            data: chunkData,
-            file_size: att.size
-          });
+          const _cr = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
+              method: 'POST',
+              headers: {
+                'apikey': SUPA_KEY,
+                'Authorization': 'Bearer ' + SUPA_KEY,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+              },
+              body: JSON.stringify({
+                message_id: msgId,
+                file_name: att.name,
+                chunk_index: ci,
+                total_chunks: totalChunks,
+                data: chunkData,
+                file_size: att.size
+              })
+            });
+            if (!_cr.ok) {
+              const _et = await _cr.text();
+              throw new Error('HTTP ' + _cr.status + ': ' + _et.slice(0, 200));
+            }
         }
 
         fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
@@ -1063,16 +1076,8 @@ async function handleFileInput(input) {
         file: f
       });
     } else {
-      try {
-        attachments.push({
-          type:'file',
-          name:f.name,
-          data: await readText(f),
-          size: f.size,
-          file: f
-        });
-      }
-      catch { toast('읽기 실패: ' + f.name); }
+      // 바이너리 파일은 File 참조만 저장 (readText로 읽으면 손상)
+      attachments.push({ type:'file', name:f.name, data: null, size: f.size, file: f });
     }
   }
   input.value = ''; renderAttachRow();
