@@ -333,7 +333,7 @@ async function extractViaBridgeCOM(messageId, fileName) {
     '  }',
     '',
     '  if (-not $chunks -or $chunks.Count -eq 0) {',
-    '    Write-Output ("FAIL:no chunks found (msgId=$msgId file=$fileName)")
+    '    Write-Output ("FAIL:no chunks found (msgId=$msgId file=$fileName)")',
     '    return',
     '  }',
     '',
