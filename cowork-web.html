@@ -956,7 +956,7 @@ async function sendMessage() {
   msgCount++;
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
-  addBubble({role:'user', content:full, images: imgs.map(i => i.data)});
+  appendMsg({role:'user', content:full, images: imgs.map(i => i.data)});
 
   let title = document.getElementById('chatTitle').textContent;
   if (msgCount > 1) title = text.substring(0, 40) || title;
