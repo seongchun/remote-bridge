@@ -82,7 +82,7 @@ async function chunksDownload(messageId, fileName) {
   }
 
   chunks.sort((a, b) => a.chunk_index - b.chunk_index);
-  const base64Full = chunks.map(c => c.data).join('');
+  const base64Full = chunks.map(c => c.data).join('\n\n');
   const buffer = Buffer.from(base64Full, 'base64');
   console.log(`[Chunks] ${fileName}: ${chunks.length}개 청크 → ${buffer.length} bytes`);
   return buffer;
