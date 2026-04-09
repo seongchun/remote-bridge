@@ -932,44 +932,40 @@ async function sendMessage() {
 
   if (files.length) {
     full += '\n\n--- 첨부 파일 내용 ---\n';
-    files.forEach(f => {
-      full += `\n[${f.name}]\n${f.data}\n`;
-    });
+    files.forEach(f => { full += `\n[${f.name}]\n${f.data}\n`; });
   }
-
-  /* Embed office files as base64 markers for relay extraction */
   if (offices.length) {
     offices.forEach(f => {
       full += `\n[ATTACHED_FILE:${f.name}]\n${f.data}\n[/ATTACHED_FILE]\n`;
     });
   }
 
-  /* Auto title */
-  if (!msgCount) {
-    let title = text.substring(0, 40);
-    if (!title && attachments.length) title = '파일 분석';
-    try { document.getElementById('chatList').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = title; } catch(e) {}
-    await sb.from('chats').update({title}).eq('id', chatId);
-    chatIndex[chatId].title = title;
-  }
+  /* ===== UI first (before any await) ===== */
   const msgId = 'msg-' + Date.now();
+  const isFirst = !msgCount;
   msgCount++;
+
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
   appendMsg({role:'user', content:full, images: imgs.map(i => i.data)});
 
-  let title = document.getElementById('chatTitle').textContent;
-  if (msgCount > 1) title = text.substring(0, 40) || title;
-  document.getElementById('chatTitle').textContent = title;
+  let autoTitle = text.substring(0, 40) || '파일 분석';
+  document.getElementById('chatTitle').textContent = autoTitle;
 
   inp.value = ''; autoResize();
-  const savedAttachments = [...attachments];
+  const savedAtt = [...attachments];
   attachments = []; renderAttachRow();
   setWaiting(true); resetProgress();
   scrollBot();
 
+  /* ===== Async Supabase ops (after UI is done) ===== */
   try {
-    const _md={id:msgId,chat_id:chatId,role:'user',content:full,status:'pending'};
+    if (isFirst) {
+      try { document.getElementById('chatList').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = autoTitle; } catch(e) {}
+      await sb.from('chats').update({title: autoTitle}).eq('id', chatId);
+      try { chatIndex[chatId].title = autoTitle; } catch(e) {}
+    }
+    const _md = {id:msgId, chat_id:chatId, role:'user', content:full, status:'pending'};
     if (imgs.length) _md.images = imgs.map(i => i.data);
     await sb.from('messages').insert(_md);
   } catch(e) {
