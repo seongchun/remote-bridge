@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+h<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -969,7 +969,7 @@ async function sendMessage() {
   document.getElementById('msgContainer').style.display = 'flex';
 
   /* Display ONLY user text + file chips (no raw data) */
-  appendMsg({role:'user', content: text || '파일 분석 요청', attachments: attMeta, images: imgs.map(i => i.data)});
+  appendMsg({id: msgId, role:'user', content: text || '파일 분석 요청', attachments: attMeta, images: imgs.map(i => i.data)});
 
   let autoTitle = text.substring(0, 40) || '파일 분석';
   document.getElementById('chatTitle').textContent = autoTitle;
