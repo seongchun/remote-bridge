@@ -954,6 +954,8 @@ async function sendMessage() {
   }
   const msgId = 'msg-' + Date.now();
   msgCount++;
+  document.getElementById('chatWelcome').style.display = 'none';
+  document.getElementById('msgContainer').style.display = 'flex';
   addBubble({role:'user', content:full, images: imgs.map(i => i.data)});
 
   let title = document.getElementById('chatTitle').textContent;
