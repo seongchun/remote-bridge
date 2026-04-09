@@ -1,7 +1,7 @@
 /**
- * Remote Bridge Relay Worker v20
+ * Remote Bridge Relay Worker v21
  * ======================================
- * UPDATES from v19:
+ * UPDATES from v20:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
  *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
  * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
@@ -153,7 +153,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v20/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v21/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -169,12 +169,13 @@ function runClaude(prompt) {
       reject(new Error('임시파일 쓰기 실패: ' + e.message));
       return;
     }
-    const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
+    const cmd = CLAUDE_EXE + ' --print --dangerously-skip-permissions < "' + tmpFile + '"';
     console.log('[Claude] 실행:', cmd.slice(0, 80));
     const proc = spawn(cmd, [], {
       timeout: CONFIG.claudeTimeout,
       shell:   true,
       env:     process.env,
+      cwd:     'C:\\CoworkRelay',
     });
     let out = '', err = '';
     proc.stdout.on('data', d => { out += d.toString(); });
@@ -621,7 +622,7 @@ async function processMessage(msg) {
     try {
       await dbInsert('messages', {
         id: 'err-' + Date.now(), chat_id, role: 'assistant',
-        content: errMsg, status: 'error',
+        content: errMsg, status: 'completed',
         files: null,
         created_at: new Date().toISOString(),
       });
@@ -654,7 +655,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v20                ║');
+  console.log('║  Remote Bridge Relay Worker v21                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
