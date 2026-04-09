@@ -5,6 +5,7 @@ h<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cowork Remote</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root {
   --bg0: #f5f4ef;
@@ -961,6 +962,31 @@ function createNewChat() {
 /* ════════════════════════════════════════
    SEND MESSAGE
 ════════════════════════════════════════ */
+async function extractPptxText(file) {
+  if (typeof JSZip === 'undefined') return null;
+  try {
+    const zip = await JSZip.loadAsync(file);
+    const slideFiles = Object.keys(zip.files)
+      .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a,b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+    if (slideFiles.length === 0) return null;
+    let text = '';
+    for (const sf of slideFiles) {
+      const xml = await zip.files[sf].async('text');
+      const num = sf.match(/slide(\d+)/)[1];
+      text += '=== Slide ' + num + ' ===\n';
+      const paras = xml.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) || [];
+      for (const para of paras) {
+        const runs = para.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [];
+        const line = runs.map(t => t.replace(/<[^>]+>/g,'')).join('').trim();
+        if (line) text += line + '\n';
+      }
+      text += '\n';
+    }
+    return text.trim() || null;
+  } catch(e) { console.warn('JSZip failed (DRM?):', e.message); return null; }
+}
+
 async function sendMessage() {
   const inp  = document.getElementById('msgInput');
   const text = inp.value.trim();
@@ -973,7 +999,12 @@ async function sendMessage() {
   /* Optimistic UI */
   const imgs  = attachments.filter(a => a.type === 'image');
   const fileAtts = attachments.filter(a => a.type === 'file');
-  appendMsg({ id: msgId, role:'user', content: text || '파일 분석 요청',
+  const textExtracted = attachments.filter(a => a.type === 'text-extracted');
+  let extractedContent = '';
+  for (const att of textExtracted) {
+    extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
+  }
+  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
     files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
@@ -1053,7 +1084,7 @@ async function sendMessage() {
       id: msgId,
       chat_id: chatId,
       role: 'user',
-      content: text || '파일 분석 요청',
+      content: (text || '파일 분석 요청') + extractedContent,
       status: 'pending',
       files: fileRefs.length > 0 ? fileRefs : null
     };
@@ -1077,6 +1108,17 @@ async function handleFileInput(input) {
         size: f.size,
         file: f
       });
+    } else if (['pptx','ppt'].includes(ext)) {
+      const extracted = await extractPptxText(f);
+      if (extracted) {
+        attachments.push({ type:'text-extracted', name:f.name, extractedText:extracted, size: f.size });
+        toast('✅ ' + f.name + ' 텍스트 완료 (브라우저)');
+      } else {
+        try {
+          attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
+          toast('⚠️ DRM: ' + f.name + ' → Bridge로 예정');
+        } catch(e2) { toast('읽기 실패: ' + f.name); }
+      }
     } else {
       try {
         attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
@@ -1107,6 +1149,8 @@ function renderAttachRow() {
   document.getElementById('attachRow').innerHTML = attachments.map((a,i) =>
     a.type==='image'
       ? `<div class="aprev"><img src="${a.data}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      : a.type==='text-extracted'
+      ? `<div class="aprev"><div class="fchip" style="background:#16a34a;color:#fff">✅<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
       : `<div class="aprev"><div class="fchip">📄<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
   ).join('');
 }
