@@ -90,6 +90,24 @@ async function chunksDownload(messageId, fileName) {
 }
 
 // ── Heartbeat ─────────────────────────────────────────────────────────────────
+
+async function chunksUpload(messageId, fileName, buffer) {
+  const CHUNK_SIZE = 30000;
+  const b64 = buffer.toString('base64');
+  const total = Math.ceil(b64.length / CHUNK_SIZE);
+  for (let i = 0; i < total; i++) {
+    const chunk = b64.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+    await dbInsert('file_chunks', {
+      message_id: messageId,
+      file_name: fileName,
+      chunk_index: i,
+      total_chunks: total,
+      data: chunk,
+    });
+  }
+  console.log('[Upload]', fileName, '→', total, '개 청크 업로드 완료');
+}
+
 async function sendHeartbeat() {
   const ts = new Date().toISOString();
   try {
@@ -186,9 +204,9 @@ function runClaude(prompt) {
     proc.stderr.on('data', d => { err += d.toString(); });
     proc.on('close', code => {
       try { fs.unlinkSync(tmpFile); } catch(e) {}
-      if (code === 0 && out.trim()) {
+      if ((code === 0 || (code === null && out.trim())) && out.trim()) {
         resolve(out.trim());
-      } else if (code === 0 && !out.trim()) {
+      } else if ((code === 0 || code === null) && !out.trim()) {
         reject(new Error('claude 응답 없음. stderr: ' + err.slice(0, 200)));
       } else {
         reject(new Error('claude 종료코드 ' + code + ': ' + (err || out).slice(0, 300)));
@@ -586,18 +604,48 @@ async function processMessage(msg) {
     const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
-    // ── Run Claude ────────────────────────────────────────────────────────
+    // ── Run Claude (파일 생성 감지) ──────────────────────────────────────
+    const workDir = 'C:\\CoworkRelay';
+    const snapBefore = {};
+    try {
+      for (const f of fs.readdirSync(workDir)) {
+        try { snapBefore[f] = fs.statSync(path.join(workDir, f)).mtimeMs; } catch(e) {}
+      }
+    } catch(e) {}
+
     const response = await runClaude(prompt);
     console.log('[Worker] 응답 수신:', response.slice(0,60));
 
-    // ── Insert assistant response ─────────────────────────────────────────
+    // ── 새 파일 / 변경된 파일 업로드 ────────────────────────────────────
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
+    const attachments = [];
+    try {
+      for (const f of fs.readdirSync(workDir)) {
+        let stat;
+        try { stat = fs.statSync(path.join(workDir, f)); } catch(e) { continue; }
+        if (!stat.isFile()) continue;
+        const before = snapBefore[f];
+        if (before !== undefined && stat.mtimeMs <= before) continue;
+        const ext = f.split('.').pop().toLowerCase();
+        const skipExts = ['js','ps1','bat','json','log','tmp'];
+        if (skipExts.includes(ext) && snapBefore[f] !== undefined) continue;
+        const buf = fs.readFileSync(path.join(workDir, f));
+        await chunksUpload(rid, f, buf);
+        attachments.push({ type: 'file', name: f });
+        console.log('[Worker] 파일 업로드:', f, buf.length + 'bytes');
+      }
+    } catch(e) {
+      console.error('[Worker] 파일 스캔 오류:', e.message);
+    }
+
+    // ── Insert assistant response ─────────────────────────────────────────
     await dbInsert('messages', {
       id: rid, chat_id, role: 'assistant',
       content: response, status: 'completed',
+      attachments: attachments.length > 0 ? attachments : null,
       files: null,
       created_at: new Date().toISOString(),
     });
