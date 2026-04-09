@@ -345,7 +345,10 @@ body {
   background: rgba(0,0,0,0.12);
   margin-bottom: 6px;
   font-size: 12px;
+  cursor: pointer;
+  transition: background 0.2s;
 }
+.msg-file-chip:hover { background: rgba(0,0,0,0.22); }
 
 /* Typing indicator */
 .typing-wrap {
@@ -1243,7 +1246,7 @@ function appendMsg(msg) {
     /* Render legacy attachments (images) */
     (msg.attachments || []).forEach(a => {
       if (a.type==='image') att += `<img class="msg-img" src="${a.data}" onclick="lightbox('${a.data}')">`;
-      else                  att += `<div class="msg-file-chip">📄 ${esc(a.name)}</div>`;
+      else                  att += `<div class="msg-file-chip" data-mid="${msg.id}" data-fn="${esc(a.name)}" onclick="downloadAttachment(this.dataset.mid,this.dataset.fn)">📄 ${esc(a.name)} ⬇️</div>`;
     });
 
     /* Render files from Storage (new msg.files JSONB column) */
@@ -1475,6 +1478,27 @@ function toast(msg, dur=3000) {
   const el = document.getElementById('toast');
   el.textContent = msg; el.classList.add('show');
   setTimeout(() => el.classList.remove('show'), dur);
+}
+
+async function downloadAttachment(msgId, fileName) {
+  toast('📥 다운로드 중...');
+  try {
+    const chunks = await sgRaw('file_chunks',
+      `message_id=eq.${msgId}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc`);
+    if (!chunks.length) { toast('❌ 파일 데이터 없음'); return; }
+    const b64 = chunks.map(c => c.data).join('');
+    const bin = atob(b64);
+    const arr = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+    const blob = new Blob([arr]);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast('✅ 다운로드: ' + fileName);
+  } catch(e) { toast('❌ 실패: ' + e.message); }
 }
 
 /* ════════════════════════════════════════
