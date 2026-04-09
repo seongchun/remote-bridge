@@ -1076,9 +1076,11 @@ async function handleFileInput(input) {
         file: f
       });
     } else {
-      // 바이너리 파일은 File 참조만 저장 (readText로 읽으면 손상)
-      attachments.push({ type:'file', name:f.name, data: null, size: f.size, file: f });
-    }
+      try {
+        attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
+      } catch {
+        toast('읽기 실패: ' + f.name);
+      }    }
   }
   input.value = ''; renderAttachRow();
 }
