@@ -991,41 +991,49 @@ async function sendMessage() {
   scrollBot();
 
   try {
-    /* STEP 1: Upload files to Supabase Storage */
+    /* STEP 1: Upload files as base64 chunks via REST API */
     const fileRefs = [];
     const filesToUpload = savedAttachments.filter(a => a.type === 'file');
+    const CHUNK_SIZE = 200000; /* ~200KB per chunk (base64) */
 
-    if (filesToUpload.length > 0) {
-      for (let i = 0; i < filesToUpload.length; i++) {
-        const att = filesToUpload[i];
-        toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
+    for (let i = 0; i < filesToUpload.length; i++) {
+      const att = filesToUpload[i];
+      toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
 
-        const timestamp = Date.now();
-        const path = chatId + '/' + timestamp + '-' + att.name;
+      try {
+        /* Read file as base64 */
+        const base64 = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result.split(',')[1] || reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(att.file);
+        });
 
-        try {
-          const uploadRes = await sb.storage.from('files').upload(path, att.file);
-          if (uploadRes.error) throw uploadRes.error;
+        /* Split into chunks */
+        const totalChunks = Math.ceil(base64.length / CHUNK_SIZE);
 
-          const urlRes = sb.storage.from('files').getPublicUrl(path);
-          const url = urlRes.data ? urlRes.data.publicUrl : '';
-
-          fileRefs.push({
-            name: att.name,
-            path: path,
-            size: att.size,
-            type: att.type,
-            url: url
+        for (let ci = 0; ci < totalChunks; ci++) {
+          const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
+          await sp('file_chunks', {
+            message_id: msgId,
+            file_name: att.name,
+            chunk_index: ci,
+            total_chunks: totalChunks,
+            data: chunkData,
+            file_size: att.size
           });
-        } catch (e) {
-          toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
-          setWaiting(false);
-          return;
         }
+
+        fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
+        toast('업로드 완료: ' + att.name + ' (' + totalChunks + '청크)');
+      } catch (e) {
+        toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
+        setWaiting(false);
+        return;
       }
     }
 
-    /* STEP 2: Insert message with file metadata only */
+    /* STEP 2: Insert message with file metadata */
     const messageData = {
       id: msgId,
       chat_id: chatId,
