@@ -795,6 +795,8 @@ let pollTimer   = null;
 let rtChannel   = null;
 let attachments = [];
 let chatHistory = [];   // [{id, title, updated}]
+let msgCount    = 0;
+let chatIndex   = {};
 
 /* ════════════════════════════════════════
    SUPABASE REST HELPERS
