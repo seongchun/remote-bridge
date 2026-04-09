@@ -973,7 +973,7 @@ async function sendMessage() {
   /* Optimistic UI */
   const imgs  = attachments.filter(a => a.type === 'image');
   const fileAtts = attachments.filter(a => a.type === 'file');
-  appendMsg({ id: msgId+'-ui', role:'user', content: text || '파일 분석 요청',
+  appendMsg({ id: msgId, role:'user', content: text || '파일 분석 요청',
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
     files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
