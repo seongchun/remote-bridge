@@ -1,7 +1,7 @@
 /**
- * Remote Bridge Relay Worker v21
+ * Remote Bridge Relay Worker v22
  * ======================================
- * UPDATES from v20:
+ * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
  *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
  * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
@@ -121,9 +121,13 @@ async function checkBridgeOnline() {
 // ── Recover stuck messages ────────────────────────────────────────────────────
 async function recoverStuckMessages() {
   try {
-    const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
+    // Only recover messages stuck within the last 60 minutes
+    // Older messages are from previous sessions and should not be reprocessed
+    const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stuck = await dbSelect('messages',
+      'role=eq.user&status=eq.processing&created_at=gt.' + encodeURIComponent(cutoff) + '&select=id,content,created_at');
     if (!stuck || stuck.length === 0) return;
-    console.log('[Recovery] processing 상태 메시지', stuck.length, '개 → pending 복구');
+    console.log('[Recovery] 최근 1시간 내 stuck 메시지', stuck.length, '개 → pending 복구');
     for (const msg of stuck) {
       await dbUpdate('messages', 'id=eq.' + encodeURIComponent(msg.id), { status: 'pending' });
       console.log('[Recovery]  -', msg.id.slice(0,8), '"' + (msg.content||'').slice(0,40) + '"');
@@ -153,7 +157,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v21/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v22/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -655,7 +659,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v21                ║');
+  console.log('║  Remote Bridge Relay Worker v22                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
