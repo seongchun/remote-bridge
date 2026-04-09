@@ -142,7 +142,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v18/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v19/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -346,7 +346,7 @@ async function extractViaBridgeCOM(messageId, fileName) {
     '  try {',
     '    if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
     '      $app = New-Object -ComObject PowerPoint.Application',
-    '      $app.Visible = [Microsoft.Office.Core.MsoTriState]::msoFalse',
+    '      $app.Visible = [Microsoft.Office.Core.MsoTriState]::msoTrue',
     '      $pres = $app.Presentations.Open($tmpF, $true, $false, $false)',
     '      $txt = ""',
     '      foreach ($sl in $pres.Slides) {',
@@ -364,7 +364,7 @@ async function extractViaBridgeCOM(messageId, fileName) {
     '      [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
     '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
     '      $app = New-Object -ComObject Word.Application',
-    '      $app.Visible = $false',
+    '      $app.Visible = $true',
     '      $doc = $app.Documents.Open($tmpF, $false, $true)',
     '      $txt = $doc.Content.Text',
     '      $doc.Close($false)',
@@ -643,7 +643,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v18                ║');
+  console.log('║  Remote Bridge Relay Worker v19                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
