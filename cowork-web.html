@@ -1001,13 +1001,15 @@ async function sendMessage() {
       toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
 
       try {
-        /* Read file as base64 */
-        const base64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result.split(',')[1] || reader.result);
-          reader.onerror = reject;
-          reader.readAsDataURL(att.file);
-        });
+        /* Read file as base64 (use cached data URL if available) */
+        const base64 = (att.data && att.data.includes(','))
+          ? att.data.split(',')[1]
+          : await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result.split(',')[1] || reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(att.file);
+          });
 
         /* Split into chunks */
         const totalChunks = Math.ceil(base64.length / CHUNK_SIZE);
