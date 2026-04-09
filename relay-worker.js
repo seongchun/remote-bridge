@@ -1,22 +1,24 @@
 /**
- * Remote Bridge Relay Worker v16
+ * Remote Bridge Relay Worker v18
  * ======================================
- * UPDATES from v15:
- * - REPLACED: Supabase Storage download with file_chunks REST API approach
- * - NEW: chunksDownload() — fetches file chunks from file_chunks table, reassembles base64
- * - UPDATED: processMessage() to use chunksDownload() instead of storageDownload()
- * - REMOVED: storageDownload() / storageUpload() (Storage API blocked by corporate proxy)
- * - KEPT: All existing functions (sendHeartbeat, recoverStuck, handlePings, runClaude, etc.)
+ * UPDATES from v17:
+ * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
+ *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
+ * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
+ *   PowerPoint COM hanging indefinitely on DRM dialogs or slow file opens
+ * - FIXED: PS script now explicitly outputs to stdout via Write-Output
+ * - IMPROVED: Better error output capture in the job-based wrapper
  */
 const https    = require('https');
 const { spawn } = require('child_process');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const crypto   = require('crypto');
 const os       = require('os');
 const fs       = require('fs');
 const path     = require('path');
 
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
+const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
 
 const CONFIG = {
@@ -24,13 +26,14 @@ const CONFIG = {
   claudeTimeout:     120000,
   heartbeatInterval: 15000,
   maxPromptLen:      4000,
+  bridgeExtractTimeout: 60000,  // 60s for Bridge COM extraction
 };
 
 let isProcessing = false;
 const HOSTNAME = os.hostname();
 const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
 
-// --- HTTPS helper ---
+// ── HTTPS helper ──────────────────────────────────────────────────────────────
 function supaReq(method, path, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
@@ -67,28 +70,26 @@ function dbSelect(table, query) { return supaReq('GET', table + (query ? '?' + q
 function dbInsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
-// ===== NEW: Download file from file_chunks table =====
+
+// ── Download file from file_chunks ────────────────────────────────────────────
 async function chunksDownload(messageId, fileName) {
   const query = `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc&select=chunk_index,total_chunks,data`;
   const chunks = await dbSelect('file_chunks', query);
-
   if (!chunks || chunks.length === 0) {
     throw new Error(`No chunks found for message=${messageId}, file=${fileName}`);
   }
-
   const totalExpected = chunks[0].total_chunks;
   if (chunks.length !== totalExpected) {
     console.warn(`[Chunks] 경고: ${fileName} - 예상 ${totalExpected}개 중 ${chunks.length}개 수신`);
   }
-
   chunks.sort((a, b) => a.chunk_index - b.chunk_index);
-  const base64Full = chunks.map(c => c.data).join('\n\n');
+  const base64Full = chunks.map(c => c.data).join('');
   const buffer = Buffer.from(base64Full, 'base64');
   console.log(`[Chunks] ${fileName}: ${chunks.length}개 청크 → ${buffer.length} bytes`);
   return buffer;
 }
 
-// --- Heartbeat ---
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
 async function sendHeartbeat() {
   const ts = new Date().toISOString();
   try {
@@ -105,7 +106,19 @@ async function sendHeartbeat() {
   } catch (e) { console.error('[HB] bridge err:', e.message); }
 }
 
-// --- Recover stuck messages ---
+// ── Check if Bridge (company PC) is online ────────────────────────────────────
+async function checkBridgeOnline() {
+  try {
+    const rows = await dbSelect('commands', 'id=eq.bridge-heartbeat&select=result');
+    if (rows && rows.length && rows[0].result) {
+      const ago = (Date.now() - new Date(rows[0].result).getTime()) / 1000;
+      return ago < 120; // Online if heartbeat within 2 minutes
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+// ── Recover stuck messages ────────────────────────────────────────────────────
 async function recoverStuckMessages() {
   try {
     const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
@@ -120,7 +133,7 @@ async function recoverStuckMessages() {
   }
 }
 
-// --- Ping Handler ---
+// ── Ping Handler ──────────────────────────────────────────────────────────────
 async function handlePings() {
   try {
     const rows = await dbSelect('commands', 'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
@@ -129,12 +142,13 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v16/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v17/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
 }
-// --- Run Claude ---
+
+// ── Run Claude ────────────────────────────────────────────────────────────────
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
@@ -144,20 +158,16 @@ function runClaude(prompt) {
       reject(new Error('임시파일 쓰기 실패: ' + e.message));
       return;
     }
-
     const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
     console.log('[Claude] 실행:', cmd.slice(0, 80));
-
     const proc = spawn(cmd, [], {
       timeout: CONFIG.claudeTimeout,
       shell:   true,
       env:     process.env,
     });
-
     let out = '', err = '';
     proc.stdout.on('data', d => { out += d.toString(); });
     proc.stderr.on('data', d => { err += d.toString(); });
-
     proc.on('close', code => {
       try { fs.unlinkSync(tmpFile); } catch(e) {}
       if (code === 0 && out.trim()) {
@@ -168,19 +178,14 @@ function runClaude(prompt) {
         reject(new Error('claude 종료코드 ' + code + ': ' + (err || out).slice(0, 300)));
       }
     });
-
     proc.on('error', e => {
       try { fs.unlinkSync(tmpFile); } catch(e2) {}
-      reject(new Error(
-        'Claude 실행 실패: ' + e.message +
-        '\n힌트: CMD에서 "where claude" 로 경로 확인 후' +
-        '\n      set CLAUDE_PATH=<경로\\claude.cmd>'
-      ));
+      reject(new Error('Claude 실행 실패: ' + e.message));
     });
   });
 }
 
-// ===== Build prompt =====
+// ── Build prompt ──────────────────────────────────────────────────────────────
 async function buildPrompt(chatId, currentContent) {
   try {
     const rows = await dbSelect('messages',
@@ -206,36 +211,318 @@ async function buildPrompt(chatId, currentContent) {
     return currentContent;
   }
 }
-// ===== LEGACY: Extract attached files from content =====
+
+// ── LEGACY: Extract attached files from content ────────────────────────────────
 async function extractAttachedFiles(content) {
   const files = [];
   let processedContent = content;
-
   const pattern = /\[ATTACHED_FILE:(.+?)\]\n([\s\S]*?)\n\[\/ATTACHED_FILE\]/g;
   let match;
-
   while ((match = pattern.exec(content)) !== null) {
     const fileName = match[1];
     const base64Data = match[2];
-
     try {
       const buffer = Buffer.from(base64Data, 'base64');
       const tmpPath = path.join(os.tmpdir(), 'relay-attach-' + Date.now() + '-' + fileName);
       fs.writeFileSync(tmpPath, buffer);
-
       console.log('[ExtractFiles] 추출:', fileName, 'size=' + buffer.length);
       files.push({ name: fileName, path: tmpPath });
-
       processedContent = processedContent.replace(match[0], '');
     } catch (e) {
       console.error('[ExtractFiles] 오류:', fileName, e.message);
     }
   }
-
   return { files, content: processedContent.trim() };
 }
 
-// ===== Process message (uses file_chunks table) =====
+// ═══════════════════════════════════════════════════════════════════════════════
+// NEW v17: File content extraction (markitdown → python-pptx → Bridge COM)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Method 1: Extract via markitdown CLI
+ */
+function extractViaMarkitdown(filePath) {
+  const out = execSync(`markitdown "${filePath}"`, {
+    encoding: 'utf8',
+    timeout: 30000,
+    shell: true
+  });
+  return out.trim();
+}
+
+/**
+ * Method 2: Extract PPTX text via Python + python-pptx
+ */
+function extractViaPythonPptx(filePath) {
+  // Try python, then py
+  const pyCommands = ['python', 'py', 'python3'];
+  let pyCmd = null;
+  for (const cmd of pyCommands) {
+    try {
+      execSync(cmd + ' -c "from pptx import Presentation"', { stdio: 'pipe', shell: true, timeout: 5000 });
+      pyCmd = cmd;
+      break;
+    } catch(e) {}
+  }
+  if (!pyCmd) throw new Error('python-pptx not available');
+
+  const script = [
+    'import sys',
+    'from pptx import Presentation',
+    'prs = Presentation(sys.argv[1])',
+    'for i, slide in enumerate(prs.slides):',
+    '    print(f"=== Slide {i+1} ===")',
+    '    for shape in slide.shapes:',
+    '        if hasattr(shape, "text_frame"):',
+    '            for para in shape.text_frame.paragraphs:',
+    '                t = para.text.strip()',
+    '                if t: print(t)',
+    '    print()',
+  ].join('\n');
+
+  const scriptPath = path.join(os.tmpdir(), 'pptx-extract-' + Date.now() + '.py');
+  fs.writeFileSync(scriptPath, script, 'utf8');
+  try {
+    const out = execSync(`${pyCmd} "${scriptPath}" "${filePath}"`, {
+      encoding: 'utf8',
+      timeout: 30000,
+      shell: true
+    });
+    return out.trim();
+  } finally {
+    try { fs.unlinkSync(scriptPath); } catch(e) {}
+  }
+}
+
+/**
+ * Method 3: Extract via Bridge (company PC) using PowerShell + Office COM
+ * Handles DRM-protected files since the company PC has the DRM agent
+ */
+async function extractViaBridgeCOM(messageId, fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  const safeName = fileName.replace(/'/g, "''"); // PS single-quote escape\n
+  // Build PowerShell script wrapped in Start-Job for timeout safety.
+  // CRITICAL: Use Write-Output (not Write-Host) — Bridge captures via
+  //   Invoke-Expression $content 2>&1 | Out-String
+  // Write-Host sends to Information stream (6) which is NOT captured.
+  // Write-Output sends to Success stream (1) which IS captured.
+  const lines = [
+    `$supaUrl = '${SUPA_URL}'`,
+    `$supaKey = '${SUPA_KEY}'`,
+    `$msgId = '${messageId}'`,
+    `$fileName = '${safeName}'`,
+    `$ext = '${ext}'`,
+    '',
+    '# Run extraction in a background job with 90-second timeout',
+    '# This prevents PowerPoint/Word COM from hanging indefinitely',
+    '$job = Start-Job -ScriptBlock {',
+    '  param($supaUrl, $supaKey, $msgId, $fileName, $ext)',
+    '',
+    '  # Download file_chunks from Supabase',
+    '  $uri = $supaUrl + "/rest/v1/file_chunks" +',
+    '    "?message_id=eq=" + [uri]::EscapeDataString($msgId) +',
+    '    "&file_name=eq=" + [uri]::EscapeDataString($fileName) +',
+    '    "&order=chunk_index.asc&select=chunk_index,data"',
+    '  $hdr = @{ apikey = $supaKey; Authorization = "Bearer $supaKey" }',
+    '  try {',
+    '    $chunks = Invoke-RestMethod -Uri $uri -Headers $hdr -Method Get',
+    '  } catch {',
+    '    Write-Output ("FAIL:chunk download error: " + $_.Exception.Message)',
+    '    return',
+    '  }',
+    '',
+    '  if (-not $chunks -or $chunks.Count -eq 0) {',
+    '    Write-Output ("FAIL:no chunks found (msgId=$msgId file=$fileName)")
+    '    return',
+    '  }',
+    '',
+    '  # Reassemble base64 -> bytes -> temp file',
+    '  $b64 = ($chunks | Sort-Object chunk_index | ForEach-Object { $_.data }) -join ""',
+    '  $bytes = [Convert]::FromBase64String($b64)',
+    '  $tmpF = [IO.Path]::Combine($env:TEMP, "bridge-" + [DateTime]::Now.Ticks + $ext)',
+    '  [IO.File]::WriteAllBytes($tmpF, $bytes)',
+    '',
+    '  try {',
+    '    if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
+    '      $app = New-Object -ComObject PowerPoint.Application',
+    '      $app.Visible = [Microsoft.Office.Core.MsoTriState]::msoFalse',
+    '      $pres = $app.Presentations.Open($tmpF, $true, $false, $false)',
+    '      $txt = ""',
+    '      foreach ($sl in $pres.Slides) {',
+    '        $txt += "=== Slide " + $sl.SlideIndex + " ===`n"',
+    '        foreach ($sh in $sl.Shapes) {',
+    '          if ($sh.HasTextFrame -eq [Microsoft.Office.Core.MsoTriState]::msoTrue) {',
+    '            $t = $sh.TextFrame.TextRange.Text.Trim()',
+    '            if ($t.Length -gt 0) { $txt += $t + "`n" }',
+    '          }',
+    '        }',
+    '        $txt += "`n"',
+    '      }',
+    '      $pres.Close()',
+    '      $app.Quit()',
+    '      [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
+    '      $app = New-Object -ComObject Word.Application',
+    '      $app.Visible = $false',
+    '      $doc = $app.Documents.Open($tmpF, $false, $true)',
+    '      $txt = $doc.Content.Text',
+    '      $doc.Close($false)',
+    '      $app.Quit()',
+    '      [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '    } else {',
+    '      Write-Output ("FAIL:unsupported extension: $ext")',
+    '      return',
+    '    }',
+    '    $len = [Math]::Min($txt.Length, 50000)',
+    '    Write-Output ("OK:" + $txt.Substring(0, $len))',
+    '  } catch {',
+    '    Write-Output ("FAIL:COM error: " + $_.Exception.Message)',
+    '  } finally {',
+    '    Remove-Item $tmpF -ErrorAction SilentlyContinue',
+    '  }',
+    '} -ArgumentList $supaUrl, $supaKey, $msgId, $fileName, $ext',
+    '',
+    '# Wait up to 90 seconds, then kill if still running',
+    '$done = $job | Wait-Job -Timeout 90',
+    'if (-not $done) {',
+    '  Stop-Job $job',
+    '  Remove-Job $job',
+    '  Write-Output "FAIL:PowerPoint COM timed out (90s) - DRM dialog or slow open"',
+    '} else {',
+    '  $out = Receive-Job $job 2>&1 | Out-String',
+    '  Remove-Job $job',
+    '  Write-Output $out.Trim()',
+    '}',
+  ];
+  const psScript = lines.join('\n');
+
+  const cmdId = 'relay-extract-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
+  await dbInsert('commands', {
+    id: cmdId,
+    action: 'run_ps',
+    target: '',
+    content: psScript,
+    status: 'pending',
+  });
+  console.log('[Bridge] COM 추출 요청:', fileName, '→ cmd:', cmdId);
+
+  // Poll for result
+  const deadline = Date.now() + CONFIG.bridgeExtractTimeout;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    const rows = await dbSelect('commands', `id=eq.${encodeURIComponent(cmdId)}&select=status,result`);
+    if (rows && rows.length) {
+      const row = rows[0];
+      if (row.status === 'completed' || row.status === 'error') {
+        try { await supaReq('DELETE', `commands?id=eq.${encodeURIComponent(cmdId)}`, null, null); } catch(e) {}
+        const result = (row.result || '').trim();
+        if (result.startsWith('OK:')) {
+          console.log('[Bridge] COM 추출 성공:', fileName, result.slice(3, 80) + '...');
+          return result.slice(3);
+        }
+        const errMsg = result.startsWith('FAIL:') ? result.slice(5) : result;
+        throw new Error('Bridge COM 실패: ' + errMsg.slice(0, 200));
+      }
+    }
+  }
+  // Timeout — cleanup
+  try { await supaReq('DELETE', `commands?id=eq.${encodeURIComponent(cmdId)}`, null, null); } catch(e) {}
+  throw new Error(`Bridge 추출 시간 초과 (${CONFIG.bridgeExtractTimeout/1000}초). 회사 PC Bridge가 온라인인지 확인하세요.`);
+}
+
+/**
+ * Main file content extraction function — tries 3 methods in order
+ * Returns extracted text, or an error message string (never throws)
+ */
+async function extractFileContent(messageId, fileName, filePath) {
+  const ext = path.extname(fileName).toLowerCase();
+  const isOffice = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'].includes(ext);
+  const isPptx   = ['.pptx', '.ppt'].includes(ext);
+  const isDocx   = ['.docx', '.doc'].includes(ext);
+
+  // ── Method 1: markitdown ──────────────────────────────────────────────────
+  let e1msg = '';
+  try {
+    console.log('[Extract] Method 1: markitdown -', fileName);
+    const text = extractViaMarkitdown(filePath);
+    if (text && text.length > 10) {
+      console.log('[Extract] markitdown 성공:', fileName);
+      return text;
+    }
+  } catch(e) {
+    e1msg = e.message.slice(0, 100);
+    console.warn('[Extract] markitdown 실패:', e1msg);
+  }
+
+  // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
+  if (isPptx) {
+    let e2msg = '';
+    try {
+      console.log('[Extract] Method 2: python-pptx -', fileName);
+      const text = extractViaPythonPptx(filePath);
+      if (text && text.length > 10) {
+        console.log('[Extract] python-pptx 성공:', fileName);
+        return text;
+      }
+    } catch(e) {
+      e2msg = e.message.slice(0, 100);
+      console.warn('[Extract] python-pptx 실패:', e2msg);
+    }
+
+    // ── Method 3: Bridge COM (회사 PC, DRM 해제 가능) ─────────────────────
+    const bridgeOnline = await checkBridgeOnline();
+    if (bridgeOnline) {
+      try {
+        console.log('[Extract] Method 3: Bridge COM -', fileName);
+        const text = await extractViaBridgeCOM(messageId, fileName);
+        if (text && text.length > 0) return text;
+      } catch(e) {
+        const e3msg = e.message;
+        console.error('[Extract] Bridge COM 실패:', e3msg);
+        return `[파일 내용 추출 실패: ${fileName}]\n` +
+          `세 가지 방법 모두 실패했습니다:\n` +
+          `• markitdown: ${e1msg}\n` +
+          `• python-pptx: ${e2msg}\n` +
+          `• Bridge COM: ${e3msg}\n\n` +
+          `💡 해결 방법:\n` +
+          `  1. 홈 PC에서: pip install markitdown[all]\n` +
+          `  2. 홈 PC에서: pip install python-pptx\n` +
+          `  3. 회사 PC가 켜져 있고 Bridge가 실행 중인지 확인`;
+      }
+    } else {
+      return `[PPTX 처리 실패: ${fileName}]\n` +
+        `markitdown과 python-pptx 모두 실패했습니다.\n` +
+        `DRM 보호 파일의 경우 회사 PC Bridge를 통한 추출이 필요하지만 Bridge가 오프라인입니다.\n\n` +
+        `💡 해결 방법:\n` +
+        `  1. 홈 PC에서: pip install markitdown[all] 또는 pip install python-pptx\n` +
+        `  2. 회사 PC를 켜고 Bridge(start-relay.bat) 실행 후 재시도`;
+    }
+  }
+
+  // ── For DOCX files: try Bridge COM ───────────────────────────────────────
+  if (isDocx) {
+    const bridgeOnline = await checkBridgeOnline();
+    if (bridgeOnline) {
+      try {
+        console.log('[Extract] DOCX Bridge COM -', fileName);
+        const text = await extractViaBridgeCOM(messageId, fileName);
+        if (text && text.length > 0) return text;
+      } catch(e) {
+        console.error('[Extract] DOCX Bridge COM 실패:', e.message);
+      }
+    }
+  }
+
+  // ── Final fallback: clear error message ───────────────────────────────────
+  return `[파일 내용 추출 불가: ${fileName}]\n` +
+    `지원 방법: markitdown(${e1msg || '명령 없음'})\n` +
+    `�💡 홈 PC에서 pip install markitdown[all] 실행 후 재시도하세요.`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Process message (file extraction with full fallback chain)
+// ═══════════════════════════════════════════════════════════════════════════════
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
@@ -246,7 +533,7 @@ async function processMessage(msg) {
   await sendHeartbeat();
 
   try {
-    // ===== Download files from file_chunks table =====
+    // ── Download files from file_chunks table ─────────────────────────────
     if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
       console.log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
@@ -255,7 +542,6 @@ async function processMessage(msg) {
           const buffer = await chunksDownload(id, file.name);
           const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + '-' + file.name);
           fs.writeFileSync(tmpPath, buffer);
-
           attachedFiles.push({ name: file.name, path: tmpPath });
           console.log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length);
         } catch (e) {
@@ -264,36 +550,31 @@ async function processMessage(msg) {
       }
     }
 
-    // ===== LEGACY: Extract [ATTACHED_FILE:...] markers =====
+    // ── LEGACY: Extract [ATTACHED_FILE:...] markers ───────────────────────
     if (content.includes('[ATTACHED_FILE:')) {
       const extracted = await extractAttachedFiles(content);
       attachedFiles = attachedFiles.concat(extracted.files);
       content = extracted.content;
     }
 
-    // ===== Run markitdown on attached files =====
+    // ── Extract text from each file (with full fallback chain) ────────────
     let fileContentText = '';
     for (const file of attachedFiles) {
-      try {
-        console.log('[Worker] markitdown 실행:', file.name);
-        const markdownOutput = execSync(`markitdown "${file.path}"`, { encoding: 'utf8' }).toString();
-        fileContentText += `\n=== ${file.name} ===\n${markdownOutput}\n`;
-      } catch (e) {
-        console.warn('[Worker] markitdown 실패:', file.name, '→ 파일경로만 사용');
-        fileContentText += `\n[첨부파일: ${file.name} at ${file.path}]\n`;
-      }
+      console.log('[Worker] 파일 내용 추출 시작:', file.name);
+      const extractedText = await extractFileContent(id, file.name, file.path);
+      fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
     }
 
-    // ===== Build final prompt =====
-    let finalContent = content + fileContentText;
+    // ── Build final prompt ────────────────────────────────────────────────
+    const finalContent = content + fileContentText;
     const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
-    // ===== Run Claude =====
+    // ── Run Claude ────────────────────────────────────────────────────────
     const response = await runClaude(prompt);
     console.log('[Worker] 응답 수신:', response.slice(0,60));
 
-    // ===== Insert assistant response =====
+    // ── Insert assistant response ─────────────────────────────────────────
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -336,13 +617,15 @@ async function processMessage(msg) {
       await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' });
     } catch(e2) { console.error('[Worker] 오류 기록 실패:', e2.message); }
 
+    // Cleanup temp files on error
     for (const file of attachedFiles) {
       try { fs.unlinkSync(file.path); } catch(e) {}
     }
   }
   await sendHeartbeat();
 }
-// ===== Poll =====
+
+// ── Poll ──────────────────────────────────────────────────────────────────────
 async function poll() {
   if (isProcessing) return;
   try {
@@ -357,26 +640,42 @@ async function poll() {
   }
 }
 
-// --- Main ---
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
-  console.log('╔════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v16            ║');
-  console.log('║  - file_chunks REST API (no Storage)      ║');
-  console.log('║  - Corporate proxy compatible             ║');
-  console.log('║  - Legacy [ATTACHED_FILE:...] support      ║');
-  console.log('╠════════════════════════════════════════════╣');
-  console.log('║  Hostname:', HOSTNAME.padEnd(31), '║');
-  console.log('╚════════════════════════════════════════════╝\n');
+  console.log('╔════════════════════════════════════════════════╗');
+  console.log('║  Remote Bridge Relay Worker v17                ║');
+  console.log('║  - markitdown → python-pptx → Bridge COM       ║');
+  console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
+  console.log('║  - file_chunks REST API (no Storage)           ║');
+  console.log('╠════════════════════════════════════════════════╣');
+  console.log('║  Hostname:', HOSTNAME.padEnd(33), '║');
+  console.log('╚════════════════════════════════════════════════╝\n');
 
+  // Check Claude CLI
   try {
     const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true }).toString().trim();
     console.log('[OK] Claude CLI:', ver);
   } catch (e) {
     console.warn('[WARN] claude --version 실패:', e.message.slice(0, 80));
-    console.warn('[HINT] CMD에서: where claude');
-    console.warn('[HINT] 찾은 경로를 set CLAUDE_PATH=<경로> 로 설정 후 재시작');
   }
 
+  // Check markitdown
+  try {
+    execSync('markitdown --version', { stdio: 'pipe', shell: true, timeout: 5000 });
+    console.log('[OK] markitdown: 설치됨');
+  } catch(e) {
+    console.warn('[WARN] markitdown: 미설치 → pip install markitdown[all]');
+  }
+
+  // Check python-pptx
+  try {
+    execSync('python -c "from pptx import Presentation"', { stdio: 'pipe', shell: true, timeout: 5000 });
+    console.log('[OK] python-pptx: 설치됨');
+  } catch(e) {
+    console.warn('[WARN] python-pptx: 미설치 → pip install python-pptx');
+  }
+
+  // Check Supabase
   try {
     await dbSelect('messages', 'limit=1&select=id');
     console.log('[OK] Supabase 연결 성공');
@@ -385,16 +684,22 @@ async function main() {
     process.exit(1);
   }
 
+  // Check file_chunks table
   try {
     await dbSelect('file_chunks', 'limit=1&select=id');
     console.log('[OK] file_chunks 테이블 접근 성공');
   } catch (e) {
     console.warn('[WARN] file_chunks 테이블 접근 실패:', e.message.slice(0, 80));
-    console.warn('[HINT] Supabase에서 file_chunks 테이블 생성 필요');
   }
 
+  // Check Bridge status
+  const bridgeOnline = await checkBridgeOnline();
+  console.log(bridgeOnline ? '[OK] Bridge (회사 PC): 온라인 (DRM 파일 추출 가능)' : '[WARN] Bridge (회사 PC): 오프라인 (DRM 파일은 처리 불가)');
+
+  // Recover stuck messages
   await recoverStuckMessages();
 
+  // Start heartbeat and polling
   await sendHeartbeat();
   console.log('[OK] 하트비트 전송 완료');
   console.log('[OK] 폴링 시작 (' + CONFIG.pollInterval + 'ms)...\n');
