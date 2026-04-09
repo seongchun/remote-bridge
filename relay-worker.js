@@ -1,12 +1,11 @@
 /**
- * Remote Bridge Relay Worker v15
+ * Remote Bridge Relay Worker v16
  * ======================================
- * UPDATES from v12:
- * - NEW: Supabase Storage integration for file attachments
- * - NEW: storageDownload() / storageUpload() functions
- * - UPDATED: processMessage() to handle files from Storage + legacy [ATTACHED_FILE:...] markers
- * - UPDATED: buildPrompt() to include file information in history
- * - UPDATED: poll() to fetch 'files' column
+ * UPDATES from v15:
+ * - REPLACED: Supabase Storage download with file_chunks REST API approach
+ * - NEW: chunksDownload() — fetches file chunks from file_chunks table, reassembles base64
+ * - UPDATED: processMessage() to use chunksDownload() instead of storageDownload()
+ * - REMOVED: storageDownload() / storageUpload() (Storage API blocked by corporate proxy)
  * - KEPT: All existing functions (sendHeartbeat, recoverStuck, handlePings, runClaude, etc.)
  */
 const https    = require('https');
@@ -31,6 +30,7 @@ let isProcessing = false;
 const HOSTNAME = os.hostname();
 const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
 
+// --- HTTPS helper ---
 function supaReq(method, path, body, extraHeaders) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
@@ -67,52 +67,28 @@ function dbSelect(table, query) { return supaReq('GET', table + (query ? '?' + q
 function dbInsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
+// ===== NEW: Download file from file_chunks table =====
+async function chunksDownload(messageId, fileName) {
+  const query = `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc&select=chunk_index,total_chunks,data`;
+  const chunks = await dbSelect('file_chunks', query);
 
-function storageDownload(storagePath) {
-  return new Promise((resolve, reject) => {
-    const url = 'https://' + SUPA_HOST + '/storage/v1/object/public/files/' + storagePath;
-    https.get(url, (res) => {
-      if (res.statusCode !== 200) {
-        reject(new Error('Storage download failed: HTTP ' + res.statusCode + ' for ' + storagePath));
-        return;
-      }
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => resolve(Buffer.concat(chunks)));
-    }).on('error', reject);
-  });
+  if (!chunks || chunks.length === 0) {
+    throw new Error(`No chunks found for message=${messageId}, file=${fileName}`);
+  }
+
+  const totalExpected = chunks[0].total_chunks;
+  if (chunks.length !== totalExpected) {
+    console.warn(`[Chunks] 경고: ${fileName} - 예상 ${totalExpected}개 중 ${chunks.length}개 수신`);
+  }
+
+  chunks.sort((a, b) => a.chunk_index - b.chunk_index);
+  const base64Full = chunks.map(c => c.data).join('');
+  const buffer = Buffer.from(base64Full, 'base64');
+  console.log(`[Chunks] ${fileName}: ${chunks.length}개 청크 → ${buffer.length} bytes`);
+  return buffer;
 }
 
-function storageUpload(storagePath, buffer, contentType) {
-  return new Promise((resolve, reject) => {
-    const headers = {
-      'Authorization': 'Bearer ' + SUPA_KEY,
-      'apikey': SUPA_KEY,
-      'Content-Type': contentType || 'application/octet-stream',
-      'Content-Length': buffer.length,
-    };
-    const req = https.request({
-      hostname: SUPA_HOST,
-      path: '/storage/v1/object/files/' + storagePath,
-      method: 'POST',
-      headers: headers,
-    }, (res) => {
-      let raw = '';
-      res.on('data', chunk => raw += chunk);
-      res.on('end', () => {
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          resolve({ path: storagePath });
-        } else {
-          reject(new Error('Storage upload failed: HTTP ' + res.statusCode + ' - ' + raw));
-        }
-      });
-    });
-    req.on('error', reject);
-    req.write(buffer);
-    req.end();
-  });
-}
-
+// --- Heartbeat ---
 async function sendHeartbeat() {
   const ts = new Date().toISOString();
   try {
@@ -129,6 +105,7 @@ async function sendHeartbeat() {
   } catch (e) { console.error('[HB] bridge err:', e.message); }
 }
 
+// --- Recover stuck messages ---
 async function recoverStuckMessages() {
   try {
     const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
@@ -143,6 +120,7 @@ async function recoverStuckMessages() {
   }
 }
 
+// --- Ping Handler ---
 async function handlePings() {
   try {
     const rows = await dbSelect('commands', 'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
@@ -151,12 +129,12 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v15/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v16/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
 }
-
+// --- Run Claude ---
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
@@ -202,6 +180,7 @@ function runClaude(prompt) {
   });
 }
 
+// ===== Build prompt =====
 async function buildPrompt(chatId, currentContent) {
   try {
     const rows = await dbSelect('messages',
@@ -227,29 +206,36 @@ async function buildPrompt(chatId, currentContent) {
     return currentContent;
   }
 }
-
+// ===== LEGACY: Extract attached files from content =====
 async function extractAttachedFiles(content) {
   const files = [];
   let processedContent = content;
+
   const pattern = /\[ATTACHED_FILE:(.+?)\]\n([\s\S]*?)\n\[\/ATTACHED_FILE\]/g;
   let match;
+
   while ((match = pattern.exec(content)) !== null) {
     const fileName = match[1];
     const base64Data = match[2];
+
     try {
       const buffer = Buffer.from(base64Data, 'base64');
       const tmpPath = path.join(os.tmpdir(), 'relay-attach-' + Date.now() + '-' + fileName);
       fs.writeFileSync(tmpPath, buffer);
+
       console.log('[ExtractFiles] 추출:', fileName, 'size=' + buffer.length);
       files.push({ name: fileName, path: tmpPath });
+
       processedContent = processedContent.replace(match[0], '');
     } catch (e) {
       console.error('[ExtractFiles] 오류:', fileName, e.message);
     }
   }
+
   return { files, content: processedContent.trim() };
 }
 
+// ===== Process message (uses file_chunks table) =====
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
@@ -260,14 +246,16 @@ async function processMessage(msg) {
   await sendHeartbeat();
 
   try {
+    // ===== Download files from file_chunks table =====
     if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
       console.log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
         try {
-          console.log('[Worker] Storage에서 다운로드:', file.name, '(' + file.path + ')');
-          const buffer = await storageDownload(file.path);
-          const tmpPath = path.join(os.tmpdir(), 'relay-storage-' + Date.now() + '-' + file.name);
+          console.log('[Worker] file_chunks에서 다운로드:', file.name, '(' + (file.chunks || '?') + '개 청크)');
+          const buffer = await chunksDownload(id, file.name);
+          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + '-' + file.name);
           fs.writeFileSync(tmpPath, buffer);
+
           attachedFiles.push({ name: file.name, path: tmpPath });
           console.log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length);
         } catch (e) {
@@ -276,31 +264,36 @@ async function processMessage(msg) {
       }
     }
 
+    // ===== LEGACY: Extract [ATTACHED_FILE:...] markers =====
     if (content.includes('[ATTACHED_FILE:')) {
       const extracted = await extractAttachedFiles(content);
       attachedFiles = attachedFiles.concat(extracted.files);
       content = extracted.content;
     }
 
+    // ===== Run markitdown on attached files =====
     let fileContentText = '';
     for (const file of attachedFiles) {
       try {
         console.log('[Worker] markitdown 실행:', file.name);
-        const markdownOutput = execSync('markitdown "' + file.path + '"', { encoding: 'utf8' }).toString();
-        fileContentText += '\n=== ' + file.name + ' ===\n' + markdownOutput + '\n';
+        const markdownOutput = execSync(`markitdown "${file.path}"`, { encoding: 'utf8' }).toString();
+        fileContentText += `\n=== ${file.name} ===\n${markdownOutput}\n`;
       } catch (e) {
         console.warn('[Worker] markitdown 실패:', file.name, '→ 파일경로만 사용');
-        fileContentText += '\n[첨부파일: ' + file.name + ' at ' + file.path + ']\n';
+        fileContentText += `\n[첨부파일: ${file.name} at ${file.path}]\n`;
       }
     }
 
+    // ===== Build final prompt =====
     let finalContent = content + fileContentText;
     const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
+    // ===== Run Claude =====
     const response = await runClaude(prompt);
     console.log('[Worker] 응답 수신:', response.slice(0,60));
 
+    // ===== Insert assistant response =====
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -315,8 +308,19 @@ async function processMessage(msg) {
     try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
     console.log('[Worker] 완료 →', rid.slice(0,8));
 
+    // Cleanup temp files
     for (const file of attachedFiles) {
       try { fs.unlinkSync(file.path); } catch(e) {}
+    }
+
+    // Cleanup file_chunks after successful processing
+    if (msg.files && msg.files.length > 0) {
+      try {
+        await supaReq('DELETE', 'file_chunks?message_id=eq.' + encodeURIComponent(id), null, null);
+        console.log('[Worker] file_chunks 정리 완료');
+      } catch (e) {
+        console.warn('[Worker] file_chunks 정리 실패:', e.message);
+      }
     }
 
   } catch (err) {
@@ -338,7 +342,7 @@ async function processMessage(msg) {
   }
   await sendHeartbeat();
 }
-
+// ===== Poll =====
 async function poll() {
   if (isProcessing) return;
   try {
@@ -353,11 +357,12 @@ async function poll() {
   }
 }
 
+// --- Main ---
 async function main() {
   console.log('╔════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v15            ║');
-  console.log('║  - Supabase Storage integration            ║');
-  console.log('║  - File download/upload support            ║');
+  console.log('║  Remote Bridge Relay Worker v16            ║');
+  console.log('║  - file_chunks REST API (no Storage)      ║');
+  console.log('║  - Corporate proxy compatible             ║');
   console.log('║  - Legacy [ATTACHED_FILE:...] support      ║');
   console.log('╠════════════════════════════════════════════╣');
   console.log('║  Hostname:', HOSTNAME.padEnd(31), '║');
@@ -378,6 +383,14 @@ async function main() {
   } catch (e) {
     console.error('[FATAL] Supabase 연결 실패:', e.message);
     process.exit(1);
+  }
+
+  try {
+    await dbSelect('file_chunks', 'limit=1&select=id');
+    console.log('[OK] file_chunks 테이블 접근 성공');
+  } catch (e) {
+    console.warn('[WARN] file_chunks 테이블 접근 실패:', e.message.slice(0, 80));
+    console.warn('[HINT] Supabase에서 file_chunks 테이블 생성 필요');
   }
 
   await recoverStuckMessages();
