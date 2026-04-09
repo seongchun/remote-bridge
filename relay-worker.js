@@ -142,7 +142,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v17/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v18/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -321,8 +321,8 @@ async function extractViaBridgeCOM(messageId, fileName) {
     '',
     '  # Download file_chunks from Supabase',
     '  $uri = $supaUrl + "/rest/v1/file_chunks" +',
-    '    "?message_id=eq=" + [uri]::EscapeDataString($msgId) +',
-    '    "&file_name=eq=" + [uri]::EscapeDataString($fileName) +',
+    '    "?message_id=eq." + [uri]::EscapeDataString($msgId) +',
+    '    "&file_name=eq." + [uri]::EscapeDataString($fileName) +',
     '    "&order=chunk_index.asc&select=chunk_index,data"',
     '  $hdr = @{ apikey = $supaKey; Authorization = "Bearer $supaKey" }',
     '  try {',
@@ -643,7 +643,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v17                ║');
+  console.log('║  Remote Bridge Relay Worker v18                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
