@@ -1,7 +1,7 @@
 /**
- * Remote Bridge Relay Worker v19
+ * Remote Bridge Relay Worker v20
  * ======================================
- * UPDATES from v18:
+ * UPDATES from v19:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
  *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
  * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
@@ -132,6 +132,17 @@ async function recoverStuckMessages() {
     console.error('[Recovery] 실패:', e.message);
   }
 }
+// ── Cleanup stale Bridge extract commands ────────────────────────────────────
+// Old relay-extract-* commands left from previous sessions (crash/timeout)
+// cause Bridge to re-open Office apps on next run. Clear them at startup.
+async function cleanupStaleExtractCommands() {
+  try {
+    await supaReq('DELETE', 'commands?id=like.relay-extract-%25&status=eq.pending', null, null);
+    console.log('[Startup] 잔여 Bridge 추출 명령 정리 완료');
+  } catch(e) { /* non-critical */ }
+}
+
+
 
 // ── Ping Handler ──────────────────────────────────────────────────────────────
 async function handlePings() {
@@ -142,7 +153,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v19/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v20/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -643,7 +654,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v19                ║');
+  console.log('║  Remote Bridge Relay Worker v20                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
@@ -698,6 +709,7 @@ async function main() {
 
   // Recover stuck messages
   await recoverStuckMessages();
+  await cleanupStaleExtractCommands();
 
   // Start heartbeat and polling
   await sendHeartbeat();
