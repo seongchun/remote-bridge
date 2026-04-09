@@ -948,7 +948,7 @@ async function sendMessage() {
   if (!msgCount) {
     let title = text.substring(0, 40);
     if (!title && attachments.length) title = '파일 분석';
-    document.getElementById('chats').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = title;
+    try { document.getElementById('chatList').querySelector(`[data-id="${chatId}"] .chat-title`).textContent = title; } catch(e) {}
     await sb.from('chats').update({title}).eq('id', chatId);
     chatIndex[chatId].title = title;
   }
