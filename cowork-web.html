@@ -919,7 +919,7 @@ async function sendMessage() {
   const inp  = document.getElementById('msgInput');
   const text = inp.value.trim();
   if (!text && !attachments.length) return;
-  if (!chatId) return;
+  if (!chatId) createNewChat();
   if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
 
   /* Build full content */
