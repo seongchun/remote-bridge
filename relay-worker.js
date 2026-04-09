@@ -1,7 +1,7 @@
 /**
- * Remote Bridge Relay Worker v18
+ * Remote Bridge Relay Worker v19
  * ======================================
- * UPDATES from v17:
+ * UPDATES from v18:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
  *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
  * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
