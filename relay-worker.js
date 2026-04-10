@@ -1,5 +1,5 @@
 /** 
- * Remote Bridge Relay Worker v25
+ * Remote Bridge Relay Worker v26
  * ======================================
  * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
@@ -493,22 +493,25 @@ async function bridgeDeprotect(messageId, fileName) {
     'if (-not $rows -or $rows.Count -eq 0) { Write-Output "FAIL:NoChunks $fileName"; exit }',
     '$b64 = ($rows | ForEach-Object { $_.data }) -join ""',
     '$srcBytes = [Convert]::FromBase64String($b64)',
-    '$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_src_" + (Get-Date -f "yyyyMMddHHmmss") + $ext))',
+    '$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_src_" + (Get-Date -f "yyyyMMddHHmmssfff") + $ext))',
     '[IO.File]::WriteAllBytes($tmpSrc, $srcBytes)',
-    '$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_out_" + (Get-Date -f "yyyyMMddHHmmss") + $ext))',
+    '$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_out_" + (Get-Date -f "yyyyMMddHHmmssfff") + $ext))',
     'if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
-    '  $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
-    '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 3',
+    '  Stop-Process -Name POWERPNT -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
+        '$app = New-Object -ComObject PowerPoint.Application; $app.Visible = 0',
+    '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 5',
     '  $pres.SaveAs($tmpOut, 24); $pres.Close(); $app.Quit()',
     '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
     '} elseif ($ext -eq ".xlsx" -or $ext -eq ".xls") {',
-    '  $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
-    '  $wb = $app.Workbooks.Open($tmpSrc); Start-Sleep 2',
+    '  Stop-Process -Name EXCEL -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
+        '$app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+    '  $wb = $app.Workbooks.Open($tmpSrc); Start-Sleep 3',
     '  $wb.SaveAs($tmpOut, 51); $wb.Close(); $app.Quit()',
     '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
     '} elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
-    '  $app = New-Object -ComObject Word.Application; $app.Visible = 0',
-    '  $doc = $app.Documents.Open($tmpSrc, 0, 0); Start-Sleep 2',
+    '  Stop-Process -Name WINWORD -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
+        '$app = New-Object -ComObject Word.Application; $app.Visible = 0',
+    '  $doc = $app.Documents.Open($tmpSrc, 0, 0); Start-Sleep 3',
     '  $doc.SaveAs2($tmpOut, 16); $doc.Close(); $app.Quit()',
     '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
     '} else { Write-Output "FAIL:UnsupportedExt $ext"; exit }',
@@ -550,6 +553,8 @@ async function bridgeDeprotect(messageId, fileName) {
       return outPath;
     }
   }
+  // Timeout cleanup: remove stale command so bridge-agent stops retrying
+  try { await supaReq('DELETE', 'commands?id=eq.' + encodeURIComponent(cmdId), null, null); } catch(_e) {}
   throw new Error('bridgeDeprotect timeout (120s): ' + fileName);
 }
 
@@ -694,9 +699,8 @@ async function processMessage(msg) {
         aPath = await bridgeDeprotect(aFile.messageId, aFile.name);
         console.log('[Worker] DRM-free path: ' + aPath);
       } catch(e) {
-        console.error('[Worker] deprotect failed, fallback extract: ' + e.message);
-        const txt = await extractFileContent(aFile.name, aFile.path);
-        fileRefText += '\n\n[파일: ' + aFile.name + ']\n' + txt;
+        console.error('[Worker] deprotect failed: ' + e.message);
+        fileRefText += '\n\n[쭤부파일: ' + aFile.name + ']\n(DRM 변환 실패, Bridge COM 확인 필요: ' + e.message.slice(0, 120) + ')';
         continue;
       }
     }
@@ -711,7 +715,8 @@ async function processMessage(msg) {
   }
 
   // Build prompt with file references
-    const prompt = await buildPrompt(chat_id, finalContent);
+        const finalContent = content + fileRefText;
+const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
     // ── Run Claude (파일 생성 감지) ──────────────────────────────────────
