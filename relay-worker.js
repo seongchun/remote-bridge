@@ -29,7 +29,7 @@ const CONFIG = {
   bridgeExtractTimeout: 60000,  // 60s for Bridge COM extraction
   drmMode:             true,    // 회사PC DRM: PPTX는 Bridge COM 직행
   fileReferenceMode:   true,    // 파일 경로를 Claude에 전달 (텍스트 추출 대신)
-  drmDeprotect:        true,    // DRM 파일 -> Bridge COM DRM-free 변환
+  drmDeprotect:        false,    // DRM 파일 -> Bridge COM DRM-free 변환
 };
 
 let isProcessing = false;
