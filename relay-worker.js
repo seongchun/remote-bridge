@@ -162,6 +162,7 @@ async function recoverStuckMessages() {
 // cause Bridge to re-open Office apps on next run. Clear them at startup.
 async function cleanupStaleExtractCommands() {
   try {
+    await supaReq('DELETE', 'commands?id=like.dp-%25&status=eq.pending', null, null);
     await supaReq('DELETE', 'commands?id=like.relay-extract-%25&status=eq.pending', null, null);
     console.log('[Startup] 잔여 Bridge 추출 명령 정리 완료');
   } catch(e) { /* non-critical */ }
