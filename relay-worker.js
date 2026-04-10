@@ -1,5 +1,5 @@
 /**
- * Remote Bridge Relay Worker v22
+ * Remote Bridge Relay Worker v23
  * ======================================
  * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
@@ -224,12 +224,12 @@ async function buildPrompt(chatId, currentContent) {
   try {
     const rows = await dbSelect('messages',
       'chat_id=eq.' + encodeURIComponent(chatId) +
-      '&status=eq.completed&order=created_at.asc&limit=10&select=id,role,content,files');
+      '&status=eq.completed&order=created_at.asc&limit=6&select=id,role,content,files');
     if (!rows || rows.length === 0) return currentContent;
     const hist = rows
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => {
-        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content||'').slice(0, 500);
+        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content||'').slice(0, 300);
         if (m.files && Array.isArray(m.files) && m.files.length > 0) {
           const fileNames = m.files.map(f => f.name).join(', ');
           line += '\n[첨부파일: ' + fileNames + ']';
