@@ -1,5 +1,5 @@
 /**
- * Remote Bridge Relay Worker v24
+ * Remote Bridge Relay Worker v25
  * ======================================
  * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
@@ -28,6 +28,8 @@ const CONFIG = {
   maxPromptLen:      4000,
   bridgeExtractTimeout: 60000,  // 60s for Bridge COM extraction
   drmMode:             true,    // 회사PC DRM: PPTX는 Bridge COM 직행
+  fileReferenceMode:   true,    // 파일 경로를 Claude에 전달 (텍스트 추출 대신)
+  drmDeprotect:        true,    // DRM 파일 -> Bridge COM DRM-free 변환
 };
 
 let isProcessing = false;
@@ -467,6 +469,91 @@ async function extractViaBridgeCOM(messageId, fileName) {
 }
 
 /**
+ * DRM 파일을 Bridge COM으로 DRM-free 변환 후 홈PC에 저장
+ * 1. Bridge COM: Office COM SaveAs(DRM-free) -> Supabase upload
+ * 2. Relay: DRM-free download -> C:\\CoworkRelay\\incoming\\ save
+ * @returns {string} home PC local file path
+ */
+async function bridgeDeprotect(messageId, fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  const deprotMsgId = 'dp-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+  const safeFn = fileName.replace(/['"]/g, '_');
+
+  const psScript = [
+    "$ErrorActionPreference = 'Stop'",
+    "$supaUrl = '" + SUPA_URL + "'",
+    "$supaKey = '" + SUPA_KEY + "'",
+    "$msgId = '" + messageId + "'",
+    "$deprotMsgId = '" + deprotMsgId + "'",
+    "$fileName = '" + safeFn + "'",
+    "$ext = '" + ext + "'",
+    '$hdr = @{ Authorization = "Bearer $supaKey"; apikey = $supaKey; "Content-Type" = "application/json" }',
+    '$encFn = [Uri]::EscapeDataString($fileName)',
+    '$rows = Invoke-RestMethod ($supaUrl + "/rest/v1/file_chunks?message_id=eq.$msgId&file_name=eq.$encFn&order=chunk_index.asc") -Headers $hdr',
+    'if (-not $rows -or $rows.Count -eq 0) { Write-Output "FAIL:NoChunks $fileName"; exit }',
+    '$b64 = ($rows | ForEach-Object { $_.data }) -join ""',
+    '$srcBytes = [Convert]::FromBase64String($b64)',
+    '$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_src_" + (Get-Date -f "yyyyMMddHHmmss") + $ext))',
+    '[IO.File]::WriteAllBytes($tmpSrc, $srcBytes)',
+    '$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_out_" + (Get-Date -f "yyyyMMddHHmmss") + $ext))',
+    'if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
+    '  $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
+    '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 3',
+    '  $pres.SaveAs($tmpOut, 24); $pres.Close(); $app.Quit()',
+    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '} elseif ($ext -eq ".xlsx" -or $ext -eq ".xls") {',
+    '  $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+    '  $wb = $app.Workbooks.Open($tmpSrc); Start-Sleep 2',
+    '  $wb.SaveAs($tmpOut, 51); $wb.Close(); $app.Quit()',
+    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '} elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
+    '  $app = New-Object -ComObject Word.Application; $app.Visible = 0',
+    '  $doc = $app.Documents.Open($tmpSrc, 0, 0); Start-Sleep 2',
+    '  $doc.SaveAs2($tmpOut, 16); $doc.Close(); $app.Quit()',
+    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '} else { Write-Output "FAIL:UnsupportedExt $ext"; exit }',
+    '$outBytes = [IO.File]::ReadAllBytes($tmpOut)',
+    '$chunkSz = 50000; $total = [Math]::Ceiling($outBytes.Length / $chunkSz)',
+    'for ($ci = 0; $ci -lt $total; $ci++) {',
+    '  $s = $ci * $chunkSz; $l = [Math]::Min($chunkSz, $outBytes.Length - $s)',
+    '  $slice = $outBytes[$s..($s+$l-1)]',
+    '  $b = [Convert]::ToBase64String($slice)',
+    '  $body = @{ message_id=$deprotMsgId; file_name=$fileName; chunk_index=$ci; total_chunks=$total; data=$b } | ConvertTo-Json -Compress',
+    '  Invoke-RestMethod ($supaUrl + "/rest/v1/file_chunks") -Method POST -Headers $hdr -Body $body',
+    '}',
+    'try { Remove-Item $tmpSrc -Force } catch {}',
+    'try { Remove-Item $tmpOut -Force } catch {}',
+    'Write-Output ("DONE:" + $deprotMsgId)',
+  ].join('\r\n');
+
+  const cmdId = 'dp-' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
+  await dbInsert('commands', { id: cmdId, action: 'run_ps', target: 'bridge', content: psScript, status: 'pending' });
+  console.log('[Worker] bridgeDeprotect queued: ' + cmdId + ' ' + fileName);
+
+  const deadline = Date.now() + 120000;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3000));
+    const rows = await dbSelect('commands', 'id=eq.' + cmdId + '&select=status,result');
+    const row = rows && rows[0];
+    if (row && (row.status === 'completed' || row.status === 'error')) {
+      try { await supaReq('DELETE', 'commands?id=eq.' + encodeURIComponent(cmdId), null, null); } catch(e) {}
+      const result = (row.result || '').trim();
+      if (!result.startsWith('DONE:')) throw new Error('deprotect failed: ' + result);
+      const dprotId = result.slice(5);
+      const dmgBuf = await chunksDownload(dprotId, fileName);
+      try { await supaReq('DELETE', 'file_chunks?message_id=eq.' + encodeURIComponent(dprotId), null, null); } catch(e) {}
+      const inDir = 'C:\\CoworkRelay\\incoming';
+      if (!fs.existsSync(inDir)) { try { fs.mkdirSync(inDir, { recursive: true }); } catch(e) {} }
+      const outPath = path.join(inDir, path.basename(fileName));
+      fs.writeFileSync(outPath, dmgBuf);
+      console.log('[Worker] DRM-free saved -> ' + outPath);
+      return outPath;
+    }
+  }
+  throw new Error('bridgeDeprotect timeout (120s): ' + fileName);
+}
+
+/**
  * Main file content extraction function — tries 3 methods in order
  * Returns extracted text, or an error message string (never throws)
  */
@@ -580,7 +667,7 @@ async function processMessage(msg) {
           const tmpExt  = path.extname(file.name);
           const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + tmpExt);
           fs.writeFileSync(tmpPath, buffer);
-          attachedFiles.push({ name: file.name, path: tmpPath });
+          attachedFiles.push({ name: file.name, path: tmpPath, messageId: msg.id });
           console.log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length);
         } catch (e) {
           console.error('[Worker] 파일 다운로드 실패:', file.name, e.message);
@@ -595,16 +682,35 @@ async function processMessage(msg) {
       content = extracted.content;
     }
 
-    // ── Extract text from each file (with full fallback chain) ────────────
-    let fileContentText = '';
-    for (const file of attachedFiles) {
-      console.log('[Worker] 파일 내용 추출 시작:', file.name);
-      const extractedText = await extractFileContent(id, file.name, file.path);
-      fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
+  // [v25] fileReferenceMode: DRM 파일은 Bridge COM DRM-free 변환, 경로만 Claude에 전달
+  const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
+  let fileRefText = '';
+  for (const aFile of attachedFiles) {
+    const aExt = path.extname(aFile.name).toLowerCase();
+    let aPath = aFile.path;
+    if (CONFIG.drmDeprotect && drmExts.includes(aExt)) {
+      try {
+        console.log('[Worker] DRM deprotect start: ' + aFile.name);
+        aPath = await bridgeDeprotect(aFile.messageId, aFile.name);
+        console.log('[Worker] DRM-free path: ' + aPath);
+      } catch(e) {
+        console.error('[Worker] deprotect failed, fallback extract: ' + e.message);
+        const txt = await extractFileContent(aFile.name, aFile.path);
+        fileRefText += '\n\n[파일: ' + aFile.name + ']\n' + txt;
+        continue;
+      }
     }
+    if (CONFIG.fileReferenceMode) {
+      fileRefText += '\n\n[첨부파일: ' + aFile.name + ']\n' +
+        '파일 경로: ' + aPath + '\n' +
+        '(Read 도구로 위 경로 파일을 직접 읽어 내용을 파악한 후 작업하세요)';
+    } else {
+      const txt = await extractFileContent(aFile.name, aPath);
+      fileRefText += '\n\n[파일: ' + aFile.name + ']\n' + txt;
+    }
+  }
 
-    // ── Build final prompt ────────────────────────────────────────────────
-    const finalContent = content + fileContentText;
+  // Build prompt with file references
     const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
