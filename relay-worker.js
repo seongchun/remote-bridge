@@ -690,6 +690,7 @@ async function processMessage(msg) {
 
   // [v25] fileReferenceMode: DRM 파일은 Bridge COM DRM-free 변환, 경로만 Claude에 전달
   const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
+  let drmFailed = false, drmFailedFile = '', drmFailedErr = '';
   let fileRefText = '';
   for (const aFile of attachedFiles) {
     const aExt = path.extname(aFile.name).toLowerCase();
@@ -701,8 +702,10 @@ async function processMessage(msg) {
         console.log('[Worker] DRM-free path: ' + aPath);
       } catch(e) {
         console.error('[Worker] deprotect failed: ' + e.message);
-        fileRefText += '\n\n[쭤부파일: ' + aFile.name + ']\n(DRM 변환 실패, Bridge COM 확인 필요: ' + e.message.slice(0, 120) + ')';
-        continue;
+        drmFailed = true;
+        drmFailedFile = aFile.name;
+        drmFailedErr = e.message;
+        break;
       }
     }
     if (CONFIG.fileReferenceMode) {
@@ -714,10 +717,21 @@ async function processMessage(msg) {
       fileRefText += '\n\n[파일: ' + aFile.name + ']\n' + txt;
     }
   }
+  // DRM 변환 실패 시 Claude 호출 없이 즉시 오류 반환
+  if (drmFailed) {
+    const KR_DRM_ERR = '\u274C DRM \ud30c\uc77c\uc744 \uc77d\uc744 \uc218 \uc5c6\uc5b4 \uc791\uc5c5\uc744 \uc911\ub2e8\ud569\ub2c8\ub2e4.';
+    const errReply = KR_DRM_ERR + '\n\n\ud30c\uc77c: ' + drmFailedFile +
+      '\n\uc624\ub958: ' + drmFailedErr.slice(0, 300) +
+      '\n\n\ud574\uacb0 \ubc29\ubc95:\n- \ud68c\uc0ac PC Bridge COM\uc774 \uc2e4\ud589 \uc911\uc778\uc9c0 \ud655\uc778\n- Office(PowerPoint/Excel/Word)\uc5d0\uc11c \ud30c\uc77c\uc744 \uc9c1\uc811 \uc5f4 \uc218 \uc788\ub294\uc9c0 \ud655\uc778\n- \ub3d9\uc77c \ud30c\uc77c\uc744 \ub2e4\uc2dc \uccca\ubd80\ud574\uc11c \uc7ac\uc2dc\ub3c4\ud574\uc8fc\uc138\uc694';
+    const errId = 'err-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+    try { await dbInsert('messages', { id: errId, chat_id, role: 'assistant', content: errReply, status: 'completed', created_at: new Date().toISOString() }); } catch(_e) {}
+    try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(_e) {}
+    return;
+  }
 
   // Build prompt with file references
-        const finalContent = content + fileRefText;
-const prompt = await buildPrompt(chat_id, finalContent);
+  const finalContent = content + fileRefText;
+  const prompt = await buildPrompt(chat_id, finalContent);
     console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
     // ── Run Claude (파일 생성 감지) ──────────────────────────────────────
