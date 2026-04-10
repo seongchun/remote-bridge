@@ -498,7 +498,7 @@ async function bridgeDeprotect(messageId, fileName) {
     '$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_out_" + (Get-Date -f "yyyyMMddHHmmssfff") + $ext))',
     'if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
     '  Stop-Process -Name POWERPNT -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '$app = New-Object -ComObject PowerPoint.Application; $app.Visible = 0',
+        '$app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
     '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 5',
     '  $pres.SaveAs($tmpOut, 24); $pres.Close(); $app.Quit()',
     '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
