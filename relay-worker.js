@@ -178,7 +178,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v22/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v26/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -825,7 +825,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v22                ║');
+  console.log('║  Remote Bridge Relay Worker v26                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
