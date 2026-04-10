@@ -1,5 +1,5 @@
 /**
- * Remote Bridge Relay Worker v23
+ * Remote Bridge Relay Worker v24
  * ======================================
  * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
@@ -27,6 +27,7 @@ const CONFIG = {
   heartbeatInterval: 15000,
   maxPromptLen:      4000,
   bridgeExtractTimeout: 60000,  // 60s for Bridge COM extraction
+  drmMode:             true,    // 회사PC DRM: PPTX는 Bridge COM 직행
 };
 
 let isProcessing = false;
@@ -475,6 +476,7 @@ async function extractFileContent(messageId, fileName, filePath) {
   const isPptx   = ['.pptx', '.ppt'].includes(ext);
   const isDocx   = ['.docx', '.doc'].includes(ext);
 
+  if (!CONFIG.drmMode || !isPptx) { // DRM 모드이면서 PPTX이면 Bridge COM 직행
   // ── Method 1: markitdown ──────────────────────────────────────────────────
   let e1msg = '';
   try {
@@ -504,6 +506,7 @@ async function extractFileContent(messageId, fileName, filePath) {
       console.warn('[Extract] python-pptx 실패:', e2msg);
     }
 
+  } // end drmMode guard
     // ── Method 3: Bridge COM (회사 PC, DRM 해제 가능) ─────────────────────
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
@@ -574,7 +577,8 @@ async function processMessage(msg) {
         try {
           console.log('[Worker] file_chunks에서 다운로드:', file.name, '(' + (file.chunks || '?') + '개 청크)');
           const buffer = await chunksDownload(id, file.name);
-          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + '-' + file.name);
+          const tmpExt  = path.extname(file.name);
+          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + tmpExt);
           fs.writeFileSync(tmpPath, buffer);
           attachedFiles.push({ name: file.name, path: tmpPath });
           console.log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length);
@@ -613,7 +617,10 @@ async function processMessage(msg) {
       }
     } catch(e) {}
 
-    const response = await runClaude(prompt);
+    // ── 파일 저장 위치 강제 지시 ──────────────────────────────
+    const FILE_SAVE_RULE = '[중요 규칙] 생성하는 모든 파일(pptx, docx, xlsx, pdf, 이미지 등)은 반드시 C:\\CoworkRelay\\ 경로에 저장할 것. 바탕화면(Desktop), Downloads, Documents 등 다른 경로에 저장 절대 금지. Python으로 파일 생성 시에도 출력 경로를 r\'C:\\\\CoworkRelay\\\\파일명\'으로 명시할 것.';
+    const finalPrompt = FILE_SAVE_RULE + '\n\n' + prompt;
+    const response = await runClaude(finalPrompt);
     console.log('[Worker] 응답 수신:', response.slice(0,60));
 
     // ── 새 파일 / 변경된 파일 업로드 ────────────────────────────────────
@@ -777,3 +784,4 @@ async function main() {
 }
 
 main().catch(e => { console.error('[FATAL]', e.message); process.exit(1); });
+
