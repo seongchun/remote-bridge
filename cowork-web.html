@@ -997,6 +997,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
   const cmdId = 'drm-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
   const psScript = [
+    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12",
     "$ErrorActionPreference = 'Stop'",
     "$supaUrl = '" + SUPA_URL + "'",
     "$supaKey = '" + SUPA_KEY + "'",
@@ -1034,6 +1035,12 @@ async function triggerDrmDeprotect(msgId, fileName) {
     "Remove-Item $tmpSrc,$tmpOut -ErrorAction SilentlyContinue",
     "Write-Output 'DONE'"
   ].join('\r\n');
+
+  // 중복 실행 방지: 기존 stale drm- 명령 삭제
+  try {
+    const _ch = {'apikey':SUPA_KEY,'Authorization':'Bearer '+SUPA_KEY,'Prefer':'return=minimal'};
+    await fetch(SUPA_URL+'/rest/v1/commands?id=like.drm-%25&status=eq.pending',{method:'DELETE',headers:_ch});
+  } catch(_e) {}
 
   const r1 = await fetch(SUPA_URL + '/rest/v1/commands', {
     method: 'POST',
