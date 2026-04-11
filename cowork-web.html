@@ -991,6 +991,17 @@ async function extractPptxText(file) {
 }
 
 
+async function showEPLoginModal() {
+  return new Promise((resolve) => {
+    const div = document.createElement('div');
+    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">⚠️ EP 로그인 필요</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM 보호 파일을 열기 위해 회사 <b>EP(포스코)</b> 로그인이 필요합니다.</p><ol style="padding-left:18px;margin-top:8px"><li>회사 PC에서 EP에 로그인하세요</li><li>ECM 연결 상태가 <b>정상</b>인지 확인하세요</li><li>준비되면 아래 <b>계속 진행</b>을 클릭하세요</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px">취소</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">계속 진행</button></div></div></div>';
+    document.body.appendChild(div);
+    const done = (v) => { div.remove(); resolve(v); };
+    document.getElementById('epContBtn').onclick = () => done(true);
+    document.getElementById('epCancelBtn').onclick = () => done(false);
+  });
+}
+
 async function triggerDrmDeprotect(msgId, fileName) {
       const ext = '.' + fileName.split('.').pop().toLowerCase();
       const safeFn = fileName.replace(/['"\\]/g, '_');
@@ -1015,23 +1026,48 @@ async function triggerDrmDeprotect(msgId, fileName) {
         "if (-not $rows -or $rows.Count -eq 0) { throw 'No chunks found for msgId=' + $msgId }",
         "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
         '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
-        '# STEP B: COM DRM removal (fully local, zero network required)',
-        "if ($ext -eq '.pptx' -or $ext -eq '.ppt') {",
-        '  Stop-Process -Name POWERPNT -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '  $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
-        '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 5',
-        '  $pres.SaveAs($tmpOut, 24); $pres.Close(); $app.Quit()',
-        "} elseif ($ext -eq '.xlsx' -or $ext -eq '.xls') {",
-        '  Stop-Process -Name EXCEL -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '  $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
-        '  $wb = $app.Workbooks.Open($tmpSrc); Start-Sleep 3; $wb.SaveAs($tmpOut, 51); $wb.Close($false); $app.Quit()',
-        "} elseif ($ext -eq '.docx' -or $ext -eq '.doc') {",
-        '  Stop-Process -Name WINWORD -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '  $app = New-Object -ComObject Word.Application; $app.Visible = 0',
-        '  $doc = $app.Documents.Open($tmpSrc, 0, 0); Start-Sleep 3; $doc.SaveAs2($tmpOut, 16); $doc.Close($false); $app.Quit()',
-        "} else { throw ('Unsupported extension: ' + $ext) }",
+        '# STEP B: COM DRM removal in background job - detects EP login dialog (FED5)',
+        '$comJob = Start-Job -ScriptBlock {',
+        '  param($src,$out,$ext)',
+        '  $ErrorActionPreference = "Stop"',
+        '  try {',
+        "    if ($ext -eq '.pptx' -or $ext -eq '.ppt') {",
+        '      Stop-Process -Name POWERPNT -Force -EA 0; Start-Sleep 1',
+        '      $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
+        '      $pres = $app.Presentations.Open($src, 0, 0, 1); Start-Sleep 5',
+        '      $pres.SaveAs($out, 24); $pres.Close(); $app.Quit()',
+        "    } elseif ($ext -eq '.xlsx' -or $ext -eq '.xls') {",
+        '      Stop-Process -Name EXCEL -Force -EA 0; Start-Sleep 1',
+        '      $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+        '      $wb = $app.Workbooks.Open($src); Start-Sleep 3; $wb.SaveAs($out, 51); $wb.Close($false); $app.Quit()',
+        "    } elseif ($ext -eq '.docx' -or $ext -eq '.doc') {",
+        '      Stop-Process -Name WINWORD -Force -EA 0; Start-Sleep 1',
+        '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
+        '      $wDoc = $app.Documents.Open($src, 0, 0); Start-Sleep 3; $wDoc.SaveAs2($out, 16); $wDoc.Close($false); $app.Quit()',
+        "    } else { throw 'Unsupported: ' + $ext }",
+        "    Write-Output 'COM_DONE'",
+        '  } catch {',
+        "    Write-Output ('COM_FAIL:' + $_.Exception.Message)",
+        '  }',
+        '} -ArgumentList $tmpSrc,$tmpOut,$ext',
+        '# Monitor: detect EP DRM dialog (FED5 title) while COM job runs',
+        '$epDetected = $false; $comWait = 0',
+        'while ($comJob.State -eq "Running" -and $comWait -lt 150) {',
+        '  Start-Sleep 2; $comWait += 2',
+        '  $epW = Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" }',
+        '  if ($epW) { $epDetected = $true; break }',
+        '}',
+        'if ($epDetected) {',
+        '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
+        "  Write-Output 'EP_LOGIN_REQUIRED'; exit",
+        '}',
+        'if ($comJob.State -ne "Completed") {',
+        '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
+        "  Write-Output 'COM_TIMEOUT'; exit",
+        '}',
+        '$comOut = (Receive-Job $comJob 2>&1 | Out-String).Trim(); Remove-Job $comJob',
+        'if ($comOut -notmatch "COM_DONE") { Remove-Item $tmpSrc -EA 0; Write-Output ("COM_FAIL:" + $comOut); exit }',
         'Remove-Item $tmpSrc -ErrorAction SilentlyContinue',
-        '# STEP C: Start one-shot HTTP server (port 7655) - PS only serves file locally, no Supabase writes',
         '$jPath = $tmpOut; $pp = 7655',
         'Start-Job -ScriptBlock {',
         '  param($fp, $pp)',
@@ -1111,6 +1147,18 @@ async function triggerDrmDeprotect(msgId, fileName) {
       }
 
       // SERVING:PORT -> browser fetches from local PS HTTP server, uploads to Supabase via browser JS
+      // EP / COM result checks
+      if (resultStr.startsWith('EP_LOGIN_REQUIRED')) {
+        const shouldRetry = await showEPLoginModal();
+        if (shouldRetry) return triggerDrmDeprotect(msgId, fileName);
+        return { ok: false, error: 'EP 로그인이 취소되었습니다' };
+      }
+      if (resultStr.startsWith('COM_TIMEOUT')) {
+        return { ok: false, error: 'DRM 변환 타임아웃 (2분 30초) - Office 응답 없음' };
+      }
+      if (resultStr.startsWith('COM_FAIL:')) {
+        return { ok: false, error: 'COM 오류: ' + resultStr.slice(9) };
+      }
       if (resultStr.startsWith('SERVING:')) {
         const srvPort = resultStr.replace('SERVING:', '').trim();
         toast('📥 DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
