@@ -1,5 +1,5 @@
 /** 
- * Remote Bridge Relay Worker v26
+ * Remote Bridge Relay Worker v27
  * ======================================
  * UPDATES from v21:
  * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
@@ -37,7 +37,8 @@ const HOSTNAME = os.hostname();
 const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
 
 // ── HTTPS helper ──────────────────────────────────────────────────────────────
-function supaReq(method, path, body, extraHeaders) {
+function supaReq(method, path, body, extraHeaders, _retries) {
+  if (_retries === undefined) _retries = 3; {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
     const headers = {
@@ -63,7 +64,13 @@ function supaReq(method, path, body, extraHeaders) {
         else reject(new Error('HTTP ' + res.statusCode + ': ' + JSON.stringify(parsed)));
       });
     });
-    req.on('error', reject);
+    req.on('error', (err) => {
+    if (_retries > 0 && (err.code === 'EAI_AGAIN' || err.code === 'ENOTFOUND' || err.code === 'ECONNRESET')) {
+      const delay = (4 - _retries) * 3000;
+      console.warn('[supaReq] ' + err.code + ' → 재시도 ' + (4 - _retries) + '/3 (' + delay + 'ms후)');
+      setTimeout(() => supaReq(method, path, body, extraHeaders, _retries - 1).then(resolve, reject), delay);
+    } else { reject(err); }
+  });
     if (bodyStr) req.write(bodyStr);
     req.end();
   });
@@ -179,7 +186,7 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v26/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay v27/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
@@ -840,7 +847,7 @@ async function poll() {
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v26                ║');
+  console.log('║  Remote Bridge Relay Worker v27                ║');
   console.log('║  - markitdown → python-pptx → Bridge COM       ║');
   console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
   console.log('║  - file_chunks REST API (no Storage)           ║');
