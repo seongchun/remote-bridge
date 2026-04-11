@@ -38,7 +38,7 @@ const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
 
 // ── HTTPS helper ──────────────────────────────────────────────────────────────
 function supaReq(method, path, body, extraHeaders, _retries) {
-  if (_retries === undefined) _retries = 3; {
+  if (_retries === undefined) _retries = 3;
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
     const headers = {
