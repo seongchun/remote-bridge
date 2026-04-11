@@ -1009,8 +1009,9 @@ async function triggerDrmDeprotect(msgId, fileName) {
       const port = 7655;
 
       const psLines = [
+        '& {',
         '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
-        "$ErrorActionPreference = 'Stop'",
+        "$ErrorActionPreference = 'Continue'",
         "$supaUrl = '" + SUPA_URL + "'",
         "$supaKey = '" + SUPA_KEY + "'",
         "$msgId = '" + msgId + "'",
@@ -1023,7 +1024,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
         "$qM = [Uri]::EscapeDataString($msgId); $qF = [Uri]::EscapeDataString($fileName)",
         '# STEP A: Download DRM file from Supabase (GET only - no writes to Supabase from PS)',
         "$rows = Invoke-RestMethod -Uri ($supaUrl+'/rest/v1/file_chunks?message_id=eq.'+$qM+'&file_name=eq.'+$qF+'&order=chunk_index.asc') -Headers $hdrs",
-        "if (-not $rows -or $rows.Count -eq 0) { throw 'No chunks found for msgId=' + $msgId }",
+        "if (-not $rows -or $rows.Count -eq 0) { Write-Output ('FAIL:NoChunks:' + $msgId); return }",
         "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
         '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
         '# STEP B: COM DRM removal in background job - detects EP login dialog (FED5)',
@@ -1059,14 +1060,14 @@ async function triggerDrmDeprotect(msgId, fileName) {
         '}',
         'if ($epDetected) {',
         '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
-        "  Write-Output 'EP_LOGIN_REQUIRED'; exit",
+        "  Write-Output 'EP_LOGIN_REQUIRED'; return",
         '}',
         'if ($comJob.State -ne "Completed") {',
         '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
-        "  Write-Output 'COM_TIMEOUT'; exit",
+        "  Write-Output 'COM_TIMEOUT'; return",
         '}',
         '$comOut = (Receive-Job $comJob 2>&1 | Out-String).Trim(); Remove-Job $comJob',
-        'if ($comOut -notmatch "COM_DONE") { Remove-Item $tmpSrc -EA 0; Write-Output ("COM_FAIL:" + $comOut); exit }',
+        'if ($comOut -notmatch "COM_DONE") { Remove-Item $tmpSrc -EA 0; Write-Output ("COM_FAIL:" + $comOut); return }',
         'Remove-Item $tmpSrc -ErrorAction SilentlyContinue',
         '$jPath = $tmpOut; $pp = 7655',
         'Start-Job -ScriptBlock {',
@@ -1142,12 +1143,12 @@ async function triggerDrmDeprotect(msgId, fileName) {
       } catch(_e) {}
 
       if (!resultStr) return { ok: false, err: 'DRM 변환 타임아웃 (150초)' };
-      if (resultStr.toUpperCase().includes('ERROR') || resultStr.toUpperCase().includes('EXCEPTION')) {
-        return { ok: false, err: resultStr.slice(0, 400) };
-      }
 
       // SERVING:PORT -> browser fetches from local PS HTTP server, uploads to Supabase via browser JS
-      // EP / COM result checks
+      // EP / COM / FAIL result checks
+      if (resultStr.startsWith('FAIL:')) {
+        return { ok: false, err: 'PS 오류: ' + resultStr.slice(5, 300) };
+      }
       if (resultStr.startsWith('EP_LOGIN_REQUIRED')) {
         const shouldRetry = await showEPLoginModal();
         if (shouldRetry) return triggerDrmDeprotect(msgId, fileName);
@@ -1740,3 +1741,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 </script>
 </body>
 </html>
+
+ Claude is active in this tab group  
