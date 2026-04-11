@@ -41,9 +41,9 @@ body {
   line-height: 1.5;
 }
 
-/* ─────────────────────────────────────────
+/* âââââââââââââââââââââââââââââââââââââââââ
    LEFT SIDEBAR
-───────────────────────────────────────── */
+âââââââââââââââââââââââââââââââââââââââââ */
 .sidebar {
   width: var(--sidebar-w);
   background: var(--bg1);
@@ -171,9 +171,9 @@ body {
 .dot.wait { background: var(--orange); animation: blink 1.5s ease-in-out infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-/* ─────────────────────────────────────────
+/* âââââââââââââââââââââââââââââââââââââââââ
    CENTER CHAT
-───────────────────────────────────────── */
+âââââââââââââââââââââââââââââââââââââââââ */
 .chat-main {
   flex: 1;
   display: flex;
@@ -471,9 +471,9 @@ body {
 .send-btn:disabled { background: var(--bg3); cursor: not-allowed; opacity: .5; }
 .send-btn svg { width: 16px; height: 16px; fill: #fff; }
 
-/* ─────────────────────────────────────────
+/* âââââââââââââââââââââââââââââââââââââââââ
    RIGHT PANEL
-───────────────────────────────────────── */
+âââââââââââââââââââââââââââââââââââââââââ */
 .right-panel {
   width: var(--right-w);
   background: var(--bg1);
@@ -603,9 +603,9 @@ body {
 .conn-name { flex: 1; }
 .conn-status { font-size: 10.5px; color: var(--text3); }
 
-/* ─────────────────────────────────────────
+/* âââââââââââââââââââââââââââââââââââââââââ
    OVERLAYS
-───────────────────────────────────────── */
+âââââââââââââââââââââââââââââââââââââââââ */
 .lightbox {
   display: none; position: fixed; inset: 0;
   background: rgba(0,0,0,.85); z-index: 1000;
@@ -672,56 +672,49 @@ body {
   font-size:11px;
   opacity:0.9;
 }
-/* Block Chrome extension sidebar/overlay from affecting layout */
-html, body { overflow-x: hidden !important; max-width: 100vw !important; }
-#app, .wrap, main, [class*="container"] { max-width: 100vw !important; overflow-x: hidden !important; }
-body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(main) {
-  display: none !important; width: 0 !important; height: 0 !important;
-  position: fixed !important; pointer-events: none !important;
-}
 </style>
 </head>
 <body>
 
-<!-- ═══════════════════════════════
+<!-- âââââââââââââââââââââââââââââââ
      LEFT SIDEBAR
-═══════════════════════════════ -->
+âââââââââââââââââââââââââââââââ -->
 <aside class="sidebar">
   <div class="sidebar-header">
     <div class="logo">Cowork <em>Remote</em></div>
     <button class="new-chat-btn" onclick="createNewChat()">
       <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      새 대화
+      ì ëí
     </button>
   </div>
 
   <div class="search-wrap">
-    <input class="search-input" type="text" placeholder="대화 검색..."
+    <input class="search-input" type="text" placeholder="ëí ê²ì..."
            id="chatSearch" oninput="filterChats(this.value)">
   </div>
 
   <div class="chat-list" id="chatList">
-    <div class="cl-section-label">최근 대화</div>
+    <div class="cl-section-label">ìµê·¼ ëí</div>
   </div>
 
   <div class="sidebar-footer">
     <div class="status-row">
       <div class="dot wait" id="dotRelay"></div>
-      <span id="lblRelay">릴레이 확인 중...</span>
+      <span id="lblRelay">ë¦´ë ì´ íì¸ ì¤...</span>
     </div>
     <div class="status-row">
       <div class="dot wait" id="dotBridge"></div>
-      <span id="lblBridge">브릿지 확인 중...</span>
+      <span id="lblBridge">ë¸ë¦¿ì§ íì¸ ì¤...</span>
     </div>
   </div>
 </aside>
 
-<!-- ═══════════════════════════════
+<!-- âââââââââââââââââââââââââââââââ
      CENTER CHAT
-═══════════════════════════════ -->
+âââââââââââââââââââââââââââââââ -->
 <main class="chat-main">
   <div class="chat-topbar">
-    <div class="chat-topbar-title" id="chatTitle">새 대화</div>
+    <div class="chat-topbar-title" id="chatTitle">ì ëí</div>
     <div class="model-chip">
       <div class="model-dot"></div>
       Claude Sonnet
@@ -732,9 +725,9 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
     <!-- Welcome state -->
     <div class="chat-welcome" id="chatWelcome">
       <div class="claude-circle">C</div>
-      <h2>안녕하세요!</h2>
-      <p>회사 PC와 연결하여 파일 작업, RPA 자동화,<br>문서 편집 등을 처리할 수 있습니다.</p>
-      <div class="hint">💡 메시지 입력 또는 파일을 첨부하세요</div>
+      <h2>ìëíì¸ì!</h2>
+      <p>íì¬ PCì ì°ê²°íì¬ íì¼ ìì, RPA ìëí,<br>ë¬¸ì í¸ì§ ë±ì ì²ë¦¬í  ì ììµëë¤.</p>
+      <div class="hint">ð¡ ë©ìì§ ìë ¥ ëë íì¼ì ì²¨ë¶íì¸ì</div>
     </div>
 
     <!-- Active messages -->
@@ -744,7 +737,7 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
   <!-- Typing indicator -->
   <div class="typing-wrap" id="typingWrap">
     <div class="typing-dots"><span></span><span></span><span></span></div>
-    <span>Claude가 응답 중...</span>
+    <span>Claudeê° ìëµ ì¤...</span>
   </div>
 
   <!-- Input area -->
@@ -752,14 +745,14 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
     <div class="attach-preview" id="attachRow"></div>
     <div class="input-box">
       <div class="input-left">
-        <button class="iact" title="파일 첨부" onclick="document.getElementById('fileInput').click()">📎</button>
-        <button class="iact" title="스크린샷 요청" onclick="requestScreenshot()">🖼️</button>
+        <button class="iact" title="íì¼ ì²¨ë¶" onclick="document.getElementById('fileInput').click()">ð</button>
+        <button class="iact" title="ì¤í¬ë¦°ì· ìì²­" onclick="requestScreenshot()">ð¼ï¸</button>
         <input type="file" id="fileInput" multiple style="display:none" onchange="handleFileInput(this)">
       </div>
       <textarea
         class="msg-input"
         id="msgInput"
-        placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
+        placeholder="ë©ìì§ë¥¼ ìë ¥íì¸ì... (Shift+Enterë¡ ì¤ë°ê¿)"
         rows="1"
       ></textarea>
       <button class="send-btn" id="sendBtn" onclick="sendMessage()">
@@ -769,31 +762,31 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
   </div>
 </main>
 
-<!-- ═══════════════════════════════
+<!-- âââââââââââââââââââââââââââââââ
      RIGHT PANEL
-═══════════════════════════════ -->
+âââââââââââââââââââââââââââââââ -->
 <aside class="right-panel">
   <div class="rp-top">
-    <div class="rp-top-title">진행 상황</div>
-    <div class="rp-badge" id="rpBadge">—</div>
+    <div class="rp-top-title">ì§í ìí©</div>
+    <div class="rp-badge" id="rpBadge">â</div>
   </div>
   <div class="rp-scroll">
 
     <!-- Steps -->
     <div class="rp-sec">
-      <div class="rp-sec-title">작업 단계</div>
+      <div class="rp-sec-title">ìì ë¨ê³</div>
       <div class="step-list" id="rpStepList">
-        <div class="step-empty">작업이 시작되면 단계별 진행이 표시됩니다.</div>
+        <div class="step-empty">ììì´ ììëë©´ ë¨ê³ë³ ì§íì´ íìë©ëë¤.</div>
       </div>
     </div>
 
     <!-- Project -->
     <div class="rp-sec">
-      <div class="rp-sec-title">프로젝트</div>
+      <div class="rp-sec-title">íë¡ì í¸</div>
       <div class="rp-project">
-        <div class="proj-ico">🏢</div>
+        <div class="proj-ico">ð¢</div>
         <div>
-          <div class="proj-name">회사 PC 코워크</div>
+          <div class="proj-name">íì¬ PC ì½ìí¬</div>
           <div class="proj-sub">Remote Bridge v4</div>
         </div>
       </div>
@@ -801,24 +794,24 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
 
     <!-- Files -->
     <div class="rp-sec" id="rpFileSec" style="display:none">
-      <div class="rp-sec-title">파일</div>
+      <div class="rp-sec-title">íì¼</div>
       <div class="file-list" id="rpFileList"></div>
     </div>
 
     <!-- Connectors -->
     <div class="rp-sec">
-      <div class="rp-sec-title">컨텍스트</div>
-      <div class="rp-sec-title" style="padding-top:3px;">커넥터</div>
+      <div class="rp-sec-title">ì»¨íì¤í¸</div>
+      <div class="rp-sec-title" style="padding-top:3px;">ì»¤ë¥í°</div>
       <div class="conn-list">
         <div class="conn-chip">
           <div class="conn-dot wait" id="connDotRelay"></div>
           <span class="conn-name">Relay</span>
-          <span class="conn-status" id="connLblRelay">확인 중</span>
+          <span class="conn-status" id="connLblRelay">íì¸ ì¤</span>
         </div>
         <div class="conn-chip">
           <div class="conn-dot wait" id="connDotBridge"></div>
-          <span class="conn-name">Bridge (회사 PC)</span>
-          <span class="conn-status" id="connLblBridge">확인 중</span>
+          <span class="conn-name">Bridge (íì¬ PC)</span>
+          <span class="conn-status" id="connLblBridge">íì¸ ì¤</span>
         </div>
       </div>
     </div>
@@ -835,9 +828,9 @@ body > :not(script):not(style):not(link):last-child:not(#app):not(.wrap):not(mai
 <div class="toast" id="toast"></div>
 
 <script>
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    CONFIG & STATE
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 const SUPA_URL = 'https://rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_KEY = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
 const sb       = supabase.createClient(SUPA_URL, SUPA_KEY);
@@ -853,9 +846,9 @@ let chatHistory = [];   // [{id, title, updated}]
 let msgCount    = 0;
 let chatIndex   = {};
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    SUPABASE REST HELPERS
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 async function sgRaw(table, qs) {
   const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${qs}`, {
     headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
@@ -883,9 +876,9 @@ async function bridgeExec(action, content, timeout = 30000) {
   return { ok: false, data: '(timeout)' };
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    CHAT HISTORY  (localStorage)
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 function loadHistory() {
   try { chatHistory = JSON.parse(localStorage.getItem('cwHistory') || '[]'); }
   catch(e) { chatHistory = []; }
@@ -912,13 +905,13 @@ function renderChatList(filter = '') {
   if (!items.length) {
     const d = document.createElement('div');
     d.className = 'cl-empty';
-    d.textContent = filter ? '검색 결과 없음' : '대화 기록이 없습니다';
+    d.textContent = filter ? 'ê²ì ê²°ê³¼ ìì' : 'ëí ê¸°ë¡ì´ ììµëë¤';
     list.appendChild(d); return;
   }
   items.forEach(c => {
     const d = document.createElement('div');
     d.className = 'cl-item' + (c.id === chatId ? ' active' : '');
-    d.innerHTML = `<span class="cl-item-icon">💬</span><span class="cl-item-title">${esc(c.title)}</span><span class="cl-item-time">${relTime(c.updated)}</span>`;
+    d.innerHTML = `<span class="cl-item-icon">ð¬</span><span class="cl-item-title">${esc(c.title)}</span><span class="cl-item-time">${relTime(c.updated)}</span>`;
     d.onclick = () => loadChat(c.id, c.title);
     list.appendChild(d);
   });
@@ -926,15 +919,15 @@ function renderChatList(filter = '') {
 function filterChats(v) { renderChatList(v); }
 function relTime(ts) {
   const d = Date.now() - ts;
-  if (d < 60000) return '방금';
-  if (d < 3600000) return Math.floor(d/60000) + '분';
-  if (d < 86400000) return Math.floor(d/3600000) + '시간';
-  return Math.floor(d/86400000) + '일';
+  if (d < 60000) return 'ë°©ê¸';
+  if (d < 3600000) return Math.floor(d/60000) + 'ë¶';
+  if (d < 86400000) return Math.floor(d/3600000) + 'ìê°';
+  return Math.floor(d/86400000) + 'ì¼';
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    CHAT SWITCHING
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 async function loadChat(id, title) {
   chatId = id;
   document.getElementById('chatTitle').textContent = title || id;
@@ -954,12 +947,12 @@ async function loadChat(id, title) {
   startPolling(5000);
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    NEW CHAT
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 function createNewChat() {
   chatId = 'chat-' + Math.random().toString(36).slice(2,10);
-  document.getElementById('chatTitle').textContent = '새 대화';
+  document.getElementById('chatTitle').textContent = 'ì ëí';
   document.getElementById('chatWelcome').style.display = 'flex';
   document.getElementById('msgContainer').style.display = 'none';
   document.getElementById('msgContainer').innerHTML = '';
@@ -969,9 +962,9 @@ function createNewChat() {
   setupRealtime();
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    SEND MESSAGE
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 async function extractPptxText(file) {
   if (typeof JSZip === 'undefined') return null;
   try {
@@ -1001,7 +994,7 @@ async function extractPptxText(file) {
 async function showEPLoginModal() {
   return new Promise((resolve) => {
     const div = document.createElement('div');
-    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">⚠️ EP 로그인 필요</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM 보호 파일을 열기 위해 회사 <b>EP(포스코)</b> 로그인이 필요합니다.</p><ol style="padding-left:18px;margin-top:8px"><li>회사 PC에서 EP에 로그인하세요</li><li>ECM 연결 상태가 <b>정상</b>인지 확인하세요</li><li>준비되면 아래 <b>계속 진행</b>을 클릭하세요</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px">취소</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">계속 진행</button></div></div></div>';
+    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">â ï¸ EP ë¡ê·¸ì¸ íì</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM ë³´í¸ íì¼ì ì´ê¸° ìí´ íì¬ <b>EP(í¬ì¤ì½)</b> ë¡ê·¸ì¸ì´ íìí©ëë¤.</p><ol style="padding-left:18px;margin-top:8px"><li>íì¬ PCìì EPì ë¡ê·¸ì¸íì¸ì</li><li>ECM ì°ê²° ìíê° <b>ì ì</b>ì¸ì§ íì¸íì¸ì</li><li>ì¤ë¹ëë©´ ìë <b>ê³ì ì§í</b>ì í´ë¦­íì¸ì</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px">ì·¨ì</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">ê³ì ì§í</button></div></div></div>';
     document.body.appendChild(div);
     const done = (v) => { div.remove(); resolve(v); };
     document.getElementById('epContBtn').onclick = () => done(true);
@@ -1120,9 +1113,9 @@ async function triggerDrmDeprotect(msgId, fileName) {
         headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
         body: JSON.stringify({ id: cmdId, action: 'run_ps', target: 'bridge', content: psContent, status: 'pending', created_at: new Date().toISOString() })
       });
-      if (!r1.ok) return { ok: false, err: '명령 삽입 실패: ' + r1.status };
+      if (!r1.ok) return { ok: false, err: 'ëªë ¹ ì½ì ì¤í¨: ' + r1.status };
 
-      toast('⏳ DRM 변환 중... (회사 PC PowerShell 실행)');
+      toast('â³ DRM ë³í ì¤... (íì¬ PC PowerShell ì¤í)');
 
       // Poll for result (150s timeout)
       const deadline = Date.now() + 150000;
@@ -1152,27 +1145,27 @@ async function triggerDrmDeprotect(msgId, fileName) {
         });
       } catch(_e) {}
 
-      if (!resultStr) return { ok: false, err: 'DRM 변환 타임아웃 (150초)' };
+      if (!resultStr) return { ok: false, err: 'DRM ë³í íììì (150ì´)' };
 
       // SERVING:PORT -> browser fetches from local PS HTTP server, uploads to Supabase via browser JS
       // EP / COM / FAIL result checks
       if (resultStr.startsWith('FAIL:')) {
-        return { ok: false, err: 'PS 오류: ' + resultStr.slice(5, 300) };
+        return { ok: false, err: 'PS ì¤ë¥: ' + resultStr.slice(5, 300) };
       }
       if (resultStr.startsWith('EP_LOGIN_REQUIRED')) {
         const shouldRetry = await showEPLoginModal();
         if (shouldRetry) return triggerDrmDeprotect(msgId, fileName);
-        return { ok: false, error: 'EP 로그인이 취소되었습니다' };
+        return { ok: false, error: 'EP ë¡ê·¸ì¸ì´ ì·¨ìëììµëë¤' };
       }
       if (resultStr.startsWith('COM_TIMEOUT')) {
-        return { ok: false, error: 'DRM 변환 타임아웃 (2분 30초) - Office 응답 없음' };
+        return { ok: false, error: 'DRM ë³í íììì (2ë¶ 30ì´) - Office ìëµ ìì' };
       }
       if (resultStr.startsWith('COM_FAIL:')) {
-        return { ok: false, error: 'COM 오류: ' + resultStr.slice(9) };
+        return { ok: false, error: 'COM ì¤ë¥: ' + resultStr.slice(9) };
       }
       if (resultStr.startsWith('SERVING:')) {
         const srvPort = resultStr.replace('SERVING:', '').trim();
-        toast('📥 DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
+        toast('ð¥ DRM í´ì  íì¼ ìì  ì¤... (localhost:' + srvPort + ')');
 
         let b64 = null;
         for (let attempt = 0; attempt < 12; attempt++) {
@@ -1185,7 +1178,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
             }
           } catch(_e) {}
         }
-        if (!b64 || b64.length < 100) return { ok: false, err: '로컬 서버에서 파일 수신 실패 (port:' + srvPort + ')' };
+        if (!b64 || b64.length < 100) return { ok: false, err: 'ë¡ì»¬ ìë²ìì íì¼ ìì  ì¤í¨ (port:' + srvPort + ')' };
 
         // Delete original DRM chunks (browser JS to Supabase)
         const hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
@@ -1202,12 +1195,12 @@ async function triggerDrmDeprotect(msgId, fileName) {
             method: 'POST', headers: hu,
             body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chunkSize, (ci + 1) * chunkSize) })
           });
-          if (!up.ok) return { ok: false, err: '청크 업로드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
+          if (!up.ok) return { ok: false, err: 'ì²­í¬ ìë¡ë ì¤í¨ (' + ci + '/' + totalChunks + '): ' + up.status };
         }
         return { ok: true };
       }
 
-      return { ok: false, err: '예상치 못한 결과: ' + resultStr.slice(0, 200) };
+      return { ok: false, err: 'ììì¹ ëª»í ê²°ê³¼: ' + resultStr.slice(0, 200) };
     }
 
 async function sendMessage() {
@@ -1215,7 +1208,7 @@ async function sendMessage() {
   const text = inp.value.trim();
   if (!text && !attachments.length) return;
   if (!chatId) return;
-  if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
+  if (!relayOnline) { toast('ë¦´ë ì´ê° ì¤íë¼ì¸ìëë¤'); return; }
 
   const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
@@ -1225,16 +1218,16 @@ async function sendMessage() {
   const textExtracted = attachments.filter(a => a.type === 'text-extracted');
   let extractedContent = '';
   for (const att of textExtracted) {
-    extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
+    extractedContent += '\n\n=== ì²¨ë¶íì¼: ' + att.name + ' ===\n' + att.extractedText + '\n=== ë ===';
   }
-  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent,
+  appendMsg({ id: msgId, role:'user', content: (text || 'íì¼ ë¶ì ìì²­') + extractedContent,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
     files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
 
-  const title = text.slice(0,30) + (text.length>30?'...':'') || '[파일 첨부]';
+  const title = text.slice(0,30) + (text.length>30?'...':'') || '[íì¼ ì²¨ë¶]';
   upsertHistory(chatId, title);
   document.getElementById('chatTitle').textContent = title;
 
@@ -1252,7 +1245,7 @@ async function sendMessage() {
 
     for (let i = 0; i < filesToUpload.length; i++) {
       const att = filesToUpload[i];
-      toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
+      toast('íì¼ ìë¡ë ì¤...(' + (i+1) + '/' + filesToUpload.length + ')');
 
       try {
         /* Read file as base64 (use cached data URL if available) */
@@ -1294,27 +1287,27 @@ async function sendMessage() {
         }
 
         fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
-        toast('업로드 완료: ' + att.name + ' (' + totalChunks + '청크)');
+        toast('ìë¡ë ìë£: ' + att.name + ' (' + totalChunks + 'ì²­í¬)');
       } catch (e) {
-        toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
+        toast('íì¼ ìë¡ë ì¤í¨: ' + att.name + ' - ' + e.message);
         setWaiting(false);
         return;
       }
     }
 
-        /* STEP 1.5: DRM 선처리 — 회사 PC에서 Office COM으로 DRM 해제 후 relay가 일반 파일 다운로드 */
+        /* STEP 1.5: DRM ì ì²ë¦¬ â íì¬ PCìì Office COMì¼ë¡ DRM í´ì  í relayê° ì¼ë° íì¼ ë¤ì´ë¡ë */
     const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
     for (const att of filesToUpload) {
       const attExt = '.' + att.name.split('.').pop().toLowerCase();
       if (drmExts.includes(attExt)) {
-        toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
+        toast('ð DRM ë³í ì¤: ' + att.name + ' (30~60ì´ ìì)...');
         const drmResult = await triggerDrmDeprotect(msgId, att.name);
         if (!drmResult.ok) {
-          toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
+          toast('â DRM ë³í ì¤í¨: ' + att.name + '\nì¤ë¥: ' + drmResult.err);
           setWaiting(false);
           return;
         }
-        toast('✅ DRM 변환 완료: ' + att.name);
+        toast('â DRM ë³í ìë£: ' + att.name);
       }
     }
 
@@ -1323,7 +1316,7 @@ async function sendMessage() {
       id: msgId,
       chat_id: chatId,
       role: 'user',
-      content: (text || '파일 분석 요청') + extractedContent,
+      content: (text || 'íì¼ ë¶ì ìì²­') + extractedContent,
       status: 'pending',
       files: fileRefs.length > 0 ? fileRefs : null
     };
@@ -1331,7 +1324,7 @@ async function sendMessage() {
     await sp('messages', messageData);
     startPolling(2000);
   } catch(e) {
-    toast('전송 실패: ' + e.message);
+    toast('ì ì¡ ì¤í¨: ' + e.message);
     setWaiting(false);
   }
 }
@@ -1351,18 +1344,18 @@ async function handleFileInput(input) {
       const extracted = await extractPptxText(f);
       if (extracted) {
         attachments.push({ type:'text-extracted', name:f.name, extractedText:extracted, size: f.size });
-        toast('✅ ' + f.name + ' 텍스트 완료 (브라우저)');
+        toast('â ' + f.name + ' íì¤í¸ ìë£ (ë¸ë¼ì°ì )');
       } else {
         try {
           attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
-          toast('⚠️ DRM: ' + f.name + ' → Bridge로 예정');
-        } catch(e2) { toast('읽기 실패: ' + f.name); }
+          toast('â ï¸ DRM: ' + f.name + ' â Bridgeë¡ ìì ');
+        } catch(e2) { toast('ì½ê¸° ì¤í¨: ' + f.name); }
       }
     } else {
       try {
         attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
       } catch {
-        toast('읽기 실패: ' + f.name);
+        toast('ì½ê¸° ì¤í¨: ' + f.name);
       }    }
   }
   input.value = ''; renderAttachRow();
@@ -1387,17 +1380,17 @@ document.addEventListener('paste', async e => {
 function renderAttachRow() {
   document.getElementById('attachRow').innerHTML = attachments.map((a,i) =>
     a.type==='image'
-      ? `<div class="aprev"><img src="${a.data}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      ? `<div class="aprev"><img src="${a.data}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">Ã</button></div>`
       : a.type==='text-extracted'
-      ? `<div class="aprev"><div class="fchip" style="background:#16a34a;color:#fff">✅<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
-      : `<div class="aprev"><div class="fchip">📄<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      ? `<div class="aprev"><div class="fchip" style="background:#16a34a;color:#fff">â<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">Ã</button></div>`
+      : `<div class="aprev"><div class="fchip">ð<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">Ã</button></div>`
   ).join('');
 }
 function rmAttach(i) { attachments.splice(i,1); renderAttachRow(); }
 
 async function requestScreenshot() {
-  if (!bridgeOnline) { toast('브릿지가 오프라인입니다'); return; }
-  toast('스크린샷 캡처 중...');
+  if (!bridgeOnline) { toast('ë¸ë¦¿ì§ê° ì¤íë¼ì¸ìëë¤'); return; }
+  toast('ì¤í¬ë¦°ì· ìº¡ì² ì¤...');
   const res = await bridgeExec('run_ps', `
     Add-Type -AssemblyName System.Windows.Forms
     $path = "$env:TEMP\\cw_ss_${Date.now()}.png"
@@ -1410,21 +1403,21 @@ async function requestScreenshot() {
   `, 15000);
   if (res.ok && res.data.length > 100) {
     attachments.push({ type:'image', name:'screenshot-'+Date.now()+'.png', data:'data:image/png;base64,'+res.data.trim() });
-    renderAttachRow(); toast('📸 스크린샷 첨부됨');
-  } else { toast('❌ 스크린샷 실패: ' + res.data.slice(0,80)); }
+    renderAttachRow(); toast('ð¸ ì¤í¬ë¦°ì· ì²¨ë¶ë¨');
+  } else { toast('â ì¤í¬ë¦°ì· ì¤í¨: ' + res.data.slice(0,80)); }
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    MESSAGE RENDERING
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 /* === File display helpers === */
 function stripFileData(text) {
   if (!text) return '';
   let t = text;
-  t = t.replace(/\n*--- 첨부 파일 내용 ---[\s\S]*$/m, '');
+  t = t.replace(/\n*--- ì²¨ë¶ íì¼ ë´ì© ---[\s\S]*$/m, '');
   t = t.replace(/\n*\[ATTACHED_FILE:[\s\S]*?\[\/ATTACHED_FILE\]\n*/g, '');
-  t = t.replace(/\n*\[첨부파일 크기 초과:[^\]]*\]/g, '');
-  return t.trim() || '파일 분석 요청';
+  t = t.replace(/\n*\[ì²¨ë¶íì¼ í¬ê¸° ì´ê³¼:[^\]]*\]/g, '');
+  return t.trim() || 'íì¼ ë¶ì ìì²­';
 }
 
 function extractFileNames(text) {
@@ -1475,24 +1468,24 @@ function appendMsg(msg) {
     const isUser = msg.role === 'user';
     const rowCls = isUser ? 'user-row' : 'ai-row';
     const avCls  = isUser ? 'user-av'  : 'ai-av';
-    const avTxt  = isUser ? '나'        : 'C';
+    const avTxt  = isUser ? 'ë'        : 'C';
 
     let att = '';
 
     /* Render legacy attachments (images) */
     (msg.attachments || []).forEach(a => {
       if (a.type==='image') att += `<img class="msg-img" src="${a.data}" onclick="lightbox('${a.data}')">`;
-      else                  att += `<div class="msg-file-chip" data-mid="${msg.id}" data-fn="${esc(a.name)}" onclick="downloadAttachment(this.dataset.mid,this.dataset.fn)">📄 ${esc(a.name)} ⬇️</div>`;
+      else                  att += `<div class="msg-file-chip" data-mid="${msg.id}" data-fn="${esc(a.name)}" onclick="downloadAttachment(this.dataset.mid,this.dataset.fn)">ð ${esc(a.name)} â¬ï¸</div>`;
     });
 
     /* Render files from Storage (new msg.files JSONB column) */
     (msg.files || []).forEach(f => {
       if (isUser) {
-        att += `<div class="msg-file-chip">📄 ${esc(f.name)}</div>`;
+        att += `<div class="msg-file-chip">ð ${esc(f.name)}</div>`;
       } else {
         att += `<a class="file-download-btn" href="${f.url}" target="_blank" download>
-          <span class="dl-icon">⬇️</span>
-          <span class="dl-text">다운로드</span>
+          <span class="dl-icon">â¬ï¸</span>
+          <span class="dl-text">ë¤ì´ë¡ë</span>
           <span class="dl-name">${esc(f.name)}</span>
         </a>`;
       }
@@ -1520,18 +1513,18 @@ function parseContent(raw) {
       const p = JSON.parse(t);
       if (p.text)    return p.text;
       if (p.content) return p.content;
-      if (p.error)   return '⚠️ ' + p.error;
+      if (p.error)   return 'â ï¸ ' + p.error;
     } catch(e) {}
   }
   return raw;
 }
 
-/* ════════════════════════════════════════
-   RIGHT PANEL — PROGRESS
-════════════════════════════════════════ */
+/* ââââââââââââââââââââââââââââââââââââââââ
+   RIGHT PANEL â PROGRESS
+ââââââââââââââââââââââââââââââââââââââââ */
 function resetProgress() {
-  document.getElementById('rpBadge').textContent = '—';
-  document.getElementById('rpStepList').innerHTML = '<div class="step-empty">작업이 시작되면 단계별 진행이 표시됩니다.</div>';
+  document.getElementById('rpBadge').textContent = 'â';
+  document.getElementById('rpStepList').innerHTML = '<div class="step-empty">ììì´ ììëë©´ ë¨ê³ë³ ì§íì´ íìë©ëë¤.</div>';
   document.getElementById('rpFileSec').style.display = 'none';
   document.getElementById('rpFileList').innerHTML = '';
 }
@@ -1547,12 +1540,12 @@ function updateProgress(msg) {
 }
 
 function renderSteps(steps, active) {
-  document.getElementById('rpBadge').textContent = steps.length + '단계';
-  const ICONS = {'✅':'✅','❌':'❌','🧠':'🧠','⚡':'⚡','🔧':'🔧','🔄':'🔄','📝':'📝','💬':'💬','🔌':'🔌','⚠️':'⚠️'};
+  document.getElementById('rpBadge').textContent = steps.length + 'ë¨ê³';
+  const ICONS = {'â':'â','â':'â','ð§ ':'ð§ ','â¡':'â¡','ð§':'ð§','ð':'ð','ð':'ð','ð¬':'ð¬','ð':'ð','â ï¸':'â ï¸'};
   document.getElementById('rpStepList').innerHTML = steps.slice(-18).map(s => {
     const firstChar = [...s][0];
-    const icon = ICONS[firstChar] || '▸';
-    const text = s.replace(/^[\u2705\u274C\u{1F9E0}\u26A1\u{1F527}\u{1F504}\u{1F4DD}\u{1F4AC}\u{1F50C}\u26A0]\s*/u,'').replace(/^▸\s*/,'');
+    const icon = ICONS[firstChar] || 'â¸';
+    const text = s.replace(/^[\u2705\u274C\u{1F9E0}\u26A1\u{1F527}\u{1F504}\u{1F4DD}\u{1F4AC}\u{1F50C}\u26A0]\s*/u,'').replace(/^â¸\s*/,'');
     const isActive = s === active;
     return `<div class="step-item${isActive?' active':''}">
       <span class="step-icon">${icon}</span>
@@ -1573,18 +1566,18 @@ function addFile(path) {
   const name = path.split('\\').pop();
   if ([...list.querySelectorAll('.rp-file-name')].some(el=>el.textContent===name)) return;
   const ext  = name.split('.').pop().toLowerCase();
-  const ico  = {'docx':'📝','doc':'📝','xlsx':'📊','xls':'📊','pptx':'📑','ppt':'📑',
-                'pdf':'📕','png':'🖼️','jpg':'🖼️','jpeg':'🖼️','js':'⚙️','ts':'⚙️',
-                'bat':'⚡','ps1':'⚡','hwp':'📋','hwpx':'📋'}[ext] || '📄';
+  const ico  = {'docx':'ð','doc':'ð','xlsx':'ð','xls':'ð','pptx':'ð','ppt':'ð',
+                'pdf':'ð','png':'ð¼ï¸','jpg':'ð¼ï¸','jpeg':'ð¼ï¸','js':'âï¸','ts':'âï¸',
+                'bat':'â¡','ps1':'â¡','hwp':'ð','hwpx':'ð'}[ext] || 'ð';
   const d = document.createElement('div');
   d.className = 'rp-file';
-  d.innerHTML = `<span class="rp-file-ico">${ico}</span><span class="rp-file-name" title="${esc(path)}">${esc(name)}</span><span class="rp-file-badge">생성됨</span>`;
+  d.innerHTML = `<span class="rp-file-ico">${ico}</span><span class="rp-file-name" title="${esc(path)}">${esc(name)}</span><span class="rp-file-badge">ìì±ë¨</span>`;
   list.appendChild(d);
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    POLLING & REALTIME
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 function startPolling(iv=5000){ stopPolling(); pollMessages(); pollTimer=setInterval(pollMessages,iv); }
 function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
 
@@ -1634,9 +1627,9 @@ function setupRealtime() {
     .subscribe();
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    STATUS CHECKS
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 async function checkRelay() {
   try {
     const rows = await sgRaw('commands', 'id=eq.relay-heartbeat&select=result,content');
@@ -1645,22 +1638,22 @@ async function checkRelay() {
       if (ago < 90) {
         relayOnline = true;
         const busy = rows[0].content === 'busy';
-        setStatus('Relay','on', busy?'처리 중':'온라인');
+        setStatus('Relay','on', busy?'ì²ë¦¬ ì¤':'ì¨ë¼ì¸');
         return;
       }
     }
-    relayOnline = false; setStatus('Relay','off','시간 초과');
-  } catch { relayOnline=false; setStatus('Relay','off','연결 오류'); }
+    relayOnline = false; setStatus('Relay','off','ìê° ì´ê³¼');
+  } catch { relayOnline=false; setStatus('Relay','off','ì°ê²° ì¤ë¥'); }
 }
 async function checkBridge() {
   try {
     const rows = await sgRaw('commands', 'id=eq.bridge-heartbeat&select=result');
     if (rows.length && rows[0].result) {
       const ago = Math.floor((Date.now()-new Date(rows[0].result).getTime())/1000);
-      if (ago < 120) { bridgeOnline=true; setStatus('Bridge','on','온라인'); return; }
+      if (ago < 120) { bridgeOnline=true; setStatus('Bridge','on','ì¨ë¼ì¸'); return; }
     }
-    bridgeOnline=false; setStatus('Bridge','wait','대기 중');
-  } catch { bridgeOnline=false; setStatus('Bridge','off','연결 오류'); }
+    bridgeOnline=false; setStatus('Bridge','wait','ëê¸° ì¤');
+  } catch { bridgeOnline=false; setStatus('Bridge','off','ì°ê²° ì¤ë¥'); }
 }
 
 function setStatus(which, state, label) {
@@ -1668,7 +1661,7 @@ function setStatus(which, state, label) {
   const dot = document.getElementById('dot'+which);
   const lbl = document.getElementById('lbl'+which);
   if (dot) dot.className = 'dot '+state;
-  if (lbl) lbl.textContent = which==='Relay' ? '릴레이 ('+label+')' : '브릿지 ('+label+')';
+  if (lbl) lbl.textContent = which==='Relay' ? 'ë¦´ë ì´ ('+label+')' : 'ë¸ë¦¿ì§ ('+label+')';
   // Right panel connector dots
   const cd  = document.getElementById('connDot'+which);
   const cl  = document.getElementById('connLbl'+which);
@@ -1676,9 +1669,9 @@ function setStatus(which, state, label) {
   if (cl)   cl.textContent = label;
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    UTILITIES
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 function scrollBot() {
   const w = document.getElementById('messagesWrap');
   w.scrollTop = w.scrollHeight;
@@ -1717,11 +1710,11 @@ function toast(msg, dur=3000) {
 }
 
 async function downloadAttachment(msgId, fileName) {
-  toast('📥 다운로드 중...');
+  toast('ð¥ ë¤ì´ë¡ë ì¤...');
   try {
     const chunks = await sgRaw('file_chunks',
       `message_id=eq.${msgId}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc`);
-    if (!chunks.length) { toast('❌ 파일 데이터 없음'); return; }
+    if (!chunks.length) { toast('â íì¼ ë°ì´í° ìì'); return; }
     const b64 = chunks.map(c => c.data).join('');
     const bin = atob(b64);
     const arr = new Uint8Array(bin.length);
@@ -1733,13 +1726,13 @@ async function downloadAttachment(msgId, fileName) {
     document.body.appendChild(a); a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    toast('✅ 다운로드: ' + fileName);
-  } catch(e) { toast('❌ 실패: ' + e.message); }
+    toast('â ë¤ì´ë¡ë: ' + fileName);
+  } catch(e) { toast('â ì¤í¨: ' + e.message); }
 }
 
-/* ════════════════════════════════════════
+/* ââââââââââââââââââââââââââââââââââââââââ
    INIT
-════════════════════════════════════════ */
+ââââââââââââââââââââââââââââââââââââââââ */
 document.addEventListener('DOMContentLoaded', async () => {
   setupInput();
   loadHistory();
@@ -1748,6 +1741,34 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(checkRelay,  15000);
   setInterval(checkBridge, 30000);
 });
+
+/* Chrome extension overlay gap fix */
+(function fixExtensionGap() {
+  function fix() {
+    document.querySelectorAll('[id*="claude-agent"],[id*="claude-glow"]').forEach(function(el) {
+      el.style.cssText = 'display:none!important;width:0!important;height:0!important;position:fixed!important;';
+    });
+    var last = document.body.lastElementChild;
+    if (last && last.tagName !== 'SCRIPT' && !last.classList.contains('toast') &&
+        !last.classList.contains('lightbox') && !last.classList.contains('right-panel')) {
+      last.style.cssText = 'display:none!important;width:0!important;height:0!important;position:fixed!important;';
+    }
+    var rp = document.querySelector('.right-panel');
+    var main = document.querySelector('.chat-main');
+    var sb = document.querySelector('.sidebar');
+    if (rp && main && sb) {
+      var gap = window.innerWidth - rp.getBoundingClientRect().right;
+      if (gap > 20) {
+        main.style.width = (window.innerWidth - sb.offsetWidth - rp.offsetWidth) + 'px';
+        main.style.flexShrink = '0';
+      } else { main.style.width = ''; main.style.flexShrink = ''; }
+    }
+  }
+  fix();
+  window.addEventListener('resize', fix);
+  new MutationObserver(fix).observe(document.body, { childList: true });
+  setInterval(fix, 3000);
+})();
 </script>
 </body>
 </html>
