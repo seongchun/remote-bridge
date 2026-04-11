@@ -1013,7 +1013,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
         '# STEP A: Download DRM file from Supabase (GET only - no writes to Supabase from PS)',
         "$rows = Invoke-RestMethod -Uri ($supaUrl+'/rest/v1/file_chunks?message_id=eq.'+$qM+'&file_name=eq.'+$qF+'&order=chunk_index.asc') -Headers $hdrs",
         "if (-not $rows -or $rows.Count -eq 0) { throw 'No chunks found for msgId=' + $msgId }",
-        "'$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
+        "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
         '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
         '# STEP B: COM DRM removal (fully local, zero network required)',
         "if ($ext -eq '.pptx' -or $ext -eq '.ppt') {",
