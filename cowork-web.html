@@ -672,17 +672,12 @@ body {
   font-size:11px;
   opacity:0.9;
 }
-/* Hide Chrome extension tab group overlay */
-[class*="claude-"], [id*="claude-tab-group"], [data-extension] {
-  display: none !important;
-  width: 0 !important;
-  height: 0 !important;
+/* Prevent Chrome extension overlay from pushing layout */
+body > div[style*="z-index"]:last-of-type {
   position: fixed !important;
   pointer-events: none !important;
-}
-html, body {
-  overflow-x: hidden !important;
-  max-width: 100vw !important;
+  width: 0 !important; height: 0 !important;
+  overflow: hidden !important;
 }
 </style>
 </head>
@@ -1040,32 +1035,42 @@ async function triggerDrmDeprotect(msgId, fileName) {
         "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
         '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
         '# STEP B: COM DRM removal in background job - detects EP login dialog (FED5)',
-  "\$comJob = Start-Job -ScriptBlock {",
-  "  param(\$src,\$out,\$ext)",
-  "  try {",
-  "    \$txt = ''",
-  "    if (\$ext -match '\\.(pptx?|pps)$') {",
-  "      \$app = New-Object -ComObject PowerPoint.Application",
-  "      \$pres = \$app.Presentations.Open(\$src, -1, 0, 1); Start-Sleep 5",
-  "      foreach (\$s in \$pres.Slides) { foreach (\$sh in \$s.Shapes) { if (\$sh.HasTextFrame) { \$txt += \$sh.TextFrame.TextRange.Text + \"`n\" } } }",
-  "      \$pres.Close(); \$app.Quit()",
-  "    } elseif (\$ext -match '\\.(xlsx?|csv)$') {",
-  "      \$app = New-Object -ComObject Excel.Application",
-  "      \$app.Visible = \$false; \$app.DisplayAlerts = \$false",
-  "      \$wb = \$app.Workbooks.Open(\$src, 0, \$true); Start-Sleep 3",
-  "      foreach (\$ws in \$wb.Worksheets) { \$ur = \$ws.UsedRange; for (\$r=1; \$r -le \$ur.Rows.Count; \$r++) { \$row=''; for (\$c=1; \$c -le \$ur.Columns.Count; \$c++) { \$row += \$ur.Cells(\$r,\$c).Text + \"`t\" }; \$txt += \$row + \"`n\" } }",
-  "      \$wb.Close(\$false); \$app.Quit()",
-  "    } elseif (\$ext -match '\\.(docx?|rtf)$') {",
-  "      \$app = New-Object -ComObject Word.Application",
-  "      \$app.Visible = \$false",
-  "      \$d = \$app.Documents.Open(\$src, \$false, \$true); Start-Sleep 3",
-  "      \$txt = \$d.Content.Text",
-  "      \$d.Close(); \$app.Quit()",
-  "    } else { throw 'Unsupported extension' }",
-  "    if (\$txt.Length -gt 0) { [IO.File]::WriteAllText(\$out, \$txt, [Text.Encoding]::UTF8); Write-Output 'COM_DONE' }",
-  "    else { throw 'Empty text extracted' }",
-  "  } catch { Write-Error \$_.Exception.Message }",
-  "} -ArgumentList \$tmpSrc,\$tmpOut,\$ext",
+        '$comJob = Start-Job -ScriptBlock {',
+        '  param($src,$out,$ext)',
+        '  $ErrorActionPreference = "Stop"',
+        '  try {',
+        '    $txt = ""',
+        "    if (\$ext -eq '.pptx' -or \$ext -eq '.ppt') {",
+        '      $app = New-Object -ComObject PowerPoint.Application',
+        '      $pres = $app.Presentations.Open($src, -1, 0, 1); Start-Sleep 5',
+        '      foreach ($s in $pres.Slides) { foreach ($sh in $s.Shapes) { if ($sh.HasTextFrame) { $txt += $sh.TextFrame.TextRange.Text + "`n" } } }',
+        '      $pres.Close(); $app.Quit()',
+        "    } elseif (\$ext -eq '.xlsx' -or \$ext -eq '.xls') {",
+        '      $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+        '      $wb = $app.Workbooks.Open($src, 0, $true); Start-Sleep 3',
+        '      foreach ($ws in $wb.Worksheets) { $ur = $ws.UsedRange; for ($r=1; $r -le $ur.Rows.Count; $r++) { $row=""; for ($c=1; $c -le $ur.Columns.Count; $c++) { $row += $ur.Cells($r,$c).Text + "`t" }; $txt += $row + "`n" } }',
+        '      $wb.Close($false); $app.Quit()',
+        "    } elseif (\$ext -eq '.docx' -or \$ext -eq '.doc') {",
+        '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
+        '      $d = $app.Documents.Open($src, $false, $true); Start-Sleep 3',
+        '      $txt = $d.Content.Text',
+        '      $d.Close(); $app.Quit()',
+        "    } else { throw 'Unsupported: ' + \$ext }",
+        '    if ($txt.Length -gt 0) { [IO.File]::WriteAllText($out, $txt, [Text.Encoding]::UTF8); Write-Output "COM_DONE" }',
+        '    else { throw "Empty text extracted" }',
+        '  } catch {',
+        '    Write-Output ("COM_FAIL:" + $_.Exception.Message)',
+        '  }',
+        '} -ArgumentList $tmpSrc,$tmpOut,$ext',
+        '# Monitor: detect EP DRM dialog (FED5 title) while COM job runs',
+        '$epDetected = $false; $comWait = 0',
+        'while ($comJob.State -eq "Running" -and $comWait -lt 150) {',
+        '  Start-Sleep 2; $comWait += 2',
+        '  $epW = Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" }',
+        '  if ($epW) { $epDetected = $true; break }',
+        '}',
+        'if ($epDetected) {',
+        '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
         "  Write-Output 'EP_LOGIN_REQUIRED'; return",
         '}',
         'if ($comJob.State -ne "Completed") {',
@@ -1100,24 +1105,43 @@ async function triggerDrmDeprotect(msgId, fileName) {
         '  } catch {}',
         "} -ArgumentList $jPath,$pp | Out-Null",
         'Start-Sleep 2',
-            case 'SERVING':
-              try {
-                const servResp = await fetch(statusObj.url);
-                if (!servResp.ok) throw new Error("HTTP " + servResp.status);
-                const b64 = await servResp.text();
-                const textContent = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
-                const hd = {
-                  'apikey': SUPA_KEY,
-                  'Authorization': 'Bearer ' + SUPA_KEY
-                };
-                await fetch(SUPA_URL + '/rest/v1/file_chunks?upload_id=eq.' + uploadId, {
-                  method: 'DELETE',
-                  headers: hd
-                });
-                return { ok: true, textContent: textContent };
-              } catch(servErr) {
-                return { ok: false, error: 'SERVING fetch error: ' + servErr.message };
-              }
+        "Write-Output ('SERVING:' + $pp)",
+        '}'
+      ];
+      const psContent = psLines.join('\r\n');
+
+      // Cleanup stale pending drm commands (browser JS to Supabase - always works)
+      try {
+        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
+        await fetch(SUPA_URL + '/rest/v1/commands?id=like.drm-%25&status=eq.pending', { method: 'DELETE', headers: _hd });
+      } catch(_e) {}
+
+      // Insert DRM command
+      const r1 = await fetch(SUPA_URL + '/rest/v1/commands', {
+        method: 'POST',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+        body: JSON.stringify({ id: cmdId, action: 'run_ps', target: 'bridge', content: psContent, status: 'pending', created_at: new Date().toISOString() })
+      });
+      if (!r1.ok) return { ok: false, err: '명령 삽입 실패: ' + r1.status };
+
+      toast('⏳ DRM 변환 중... (회사 PC PowerShell 실행)');
+
+      // Poll for result (150s timeout)
+      const deadline = Date.now() + 150000;
+      let resultStr = '';
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000));
+        try {
+          const rp = await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId) + '&select=status,result', {
+            headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+          });
+          const rows = await rp.json();
+          if (rows.length > 0) {
+            const s = rows[0].status;
+            if (s === 'complete' || s === 'completed' || s === 'error') {
+              resultStr = rows[0].result || '';
+              break;
+            }
           }
         } catch(_e) {}
       }
@@ -1150,7 +1174,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
       }
       if (resultStr.startsWith('SERVING:')) {
         const srvPort = resultStr.replace('SERVING:', '').trim();
-        toast('📥 DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
+        toast('📥 DRM 해제 텍스트 수신 중... (localhost:' + srvPort + ')');
 
         let b64 = null;
         for (let attempt = 0; attempt < 12; attempt++) {
@@ -1159,30 +1183,22 @@ async function triggerDrmDeprotect(msgId, fileName) {
             const fr = await fetch('http://localhost:' + srvPort + '/');
             if (fr.ok) {
               b64 = await fr.text();
-              if (b64 && b64.length > 100) break;
+              if (b64 && b64.length > 10) break;
             }
           } catch(_e) {}
         }
-        if (!b64 || b64.length < 100) return { ok: false, err: '로컬 서버에서 파일 수신 실패 (port:' + srvPort + ')' };
+        if (!b64) return { ok: false, err: '로컬 서버에서 텍스트 수신 실패 (port:' + srvPort + ')' };
 
-        // Delete original DRM chunks (browser JS to Supabase)
+        // Decode base64 text content
+        const textContent = new TextDecoder().decode(Uint8Array.from(atob(b64), c => c.charCodeAt(0)));
+
+        // Delete original DRM chunks
         const hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
         await fetch(SUPA_URL + '/rest/v1/file_chunks?message_id=eq.' + encodeURIComponent(msgId) + '&file_name=eq.' + encodeURIComponent(fileName), {
           method: 'DELETE', headers: hd
         });
 
-        // Upload DRM-free chunks (browser JS to Supabase)
-        const chunkSize = 100000;
-        const totalChunks = Math.ceil(b64.length / chunkSize);
-        const hu = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
-        for (let ci = 0; ci < totalChunks; ci++) {
-          const up = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
-            method: 'POST', headers: hu,
-            body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chunkSize, (ci + 1) * chunkSize) })
-          });
-          if (!up.ok) return { ok: false, err: '청크 업로드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
-        }
-        return { ok: true };
+        return { ok: true, textContent: textContent };
       }
 
       return { ok: false, err: '예상치 못한 결과: ' + resultStr.slice(0, 200) };
@@ -1287,11 +1303,18 @@ async function sendMessage() {
       if (drmExts.includes(attExt)) {
         toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
         const drmResult = await triggerDrmDeprotect(msgId, att.name);
-            if (drmResult.textContent) {
-                extractedContent += '\n\n=== \uCCA8\uBD80\uD30C\uC77C: ' + att.name + ' ===\n' + drmResult.textContent + '\n=== \uB05D ===';
-                const fi = fileRefs.findIndex(f => f.name === att.name);
-                if (fi >= 0) fileRefs.splice(fi, 1);
-            }
+        if (drmResult.textContent) {
+            extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + drmResult.textContent + '\n=== 끝 ===';
+            const fi = fileRefs.findIndex(f => f.name === att.name);
+            if (fi >= 0) fileRefs.splice(fi, 1);
+            toast('✅ DRM 텍스트 추출 완료: ' + att.name);
+            continue;
+        }
+        if (!drmResult.ok) {
+          toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
+          setWaiting(false);
+          return;
+        }
         toast('✅ DRM 변환 완료: ' + att.name);
       }
     }
