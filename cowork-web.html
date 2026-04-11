@@ -1094,7 +1094,8 @@ async function triggerDrmDeprotect(msgId, fileName) {
         '  } catch {}',
         "} -ArgumentList $jPath,$pp | Out-Null",
         'Start-Sleep 2',
-        "Write-Output ('SERVING:' + $pp)"
+        "Write-Output ('SERVING:' + $pp)",
+        '}'
       ];
       const psContent = psLines.join('\r\n');
 
