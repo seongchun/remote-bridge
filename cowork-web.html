@@ -41,9 +41,9 @@ body {
   line-height: 1.5;
 }
 
-/* ─────────────────────────────────────────
+/* ────────────────────────────────────────────────────────────────
    LEFT SIDEBAR
-───────────────────────────────────────── */
+──────────────────────────────────────────────────────────────── */
 .sidebar {
   width: var(--sidebar-w);
   background: var(--bg1);
@@ -85,6 +85,888 @@ body {
 }
 .new-chat-btn:hover {
   background: var(--bg4);
+}
+.new-chat-btn:active {
+  background: var(--bg2);
+}
+.new-chat-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2;
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-bottom: 3px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text1);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all .15s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-item:hover {
+  background: var(--bg2);
+  border-color: var(--border);
+}
+.chat-item.active {
+  background: var(--bg3);
+  border-color: var(--border);
+  font-weight: 600;
+  color: var(--text1);
+}
+.chat-item .icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  opacity: .6;
+}
+.chat-item .text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-item .delete-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all .15s;
+  font-size: 16px;
+  line-height: 1;
+}
+.chat-item:hover .delete-btn {
+  display: flex;
+}
+.chat-item .delete-btn:hover {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.sidebar-footer {
+  padding: 10px 8px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+}
+
+.sidebar-footer button {
+  flex: 1;
+  padding: 6px 8px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+  font-weight: 500;
+}
+.sidebar-footer button:hover {
+  background: var(--bg3);
+}
+.sidebar-footer button:active {
+  background: var(--bg4);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   MAIN CONTENT AREA
+──────────────────────────────────────────────────────────────── */
+.main-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.top-bar {
+  padding: 12px 16px;
+  background: var(--bg1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.top-bar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text1);
+}
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.message-group {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+  align-items: flex-start;
+}
+
+.message-group.user {
+  justify-content: flex-end;
+  align-items: flex-end;
+}
+
+.message-group.assistant {
+  justify-content: flex-start;
+  align-items: flex-start;
+}
+
+.avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: white;
+}
+
+.avatar.user {
+  background: var(--blue);
+}
+
+.avatar.assistant {
+  background: var(--bg2);
+  color: var(--text1);
+}
+
+.message-content {
+  max-width: 70%;
+  word-wrap: break-word;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.message-bubble {
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text1);
+}
+
+.message-bubble.user {
+  background: var(--blue);
+  color: white;
+  border-bottom-right-radius: 4px;
+}
+
+.message-bubble.assistant {
+  background: var(--bg3);
+  border-bottom-left-radius: 4px;
+}
+
+.input-section {
+  padding: 12px 16px;
+  background: var(--bg1);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.input-wrapper {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.input-field {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 12px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text1);
+  font-size: 13px;
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  transition: all .15s;
+}
+
+.input-field:focus {
+  background: var(--bg1);
+  border-color: var(--blue);
+}
+
+.input-field::placeholder {
+  color: var(--text3);
+}
+
+.send-btn {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--blue);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all .15s;
+}
+
+.send-btn:hover:not(:disabled) {
+  background: var(--blue2);
+}
+
+.send-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.send-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   RIGHT SIDEBAR
+──────────────────────────────────────────────────────────────── */
+.right-sidebar {
+  width: var(--right-w);
+  background: var(--bg1);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  max-height: 100vh;
+}
+
+.right-header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.right-header h3 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text1);
+  margin: 0;
+}
+
+.right-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 10px;
+}
+
+.info-block {
+  margin-bottom: 16px;
+}
+
+.info-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+}
+
+.info-value {
+  font-size: 13px;
+  color: var(--text1);
+  word-break: break-word;
+  line-height: 1.4;
+}
+
+.info-value a {
+  color: var(--blue);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.info-value a:hover {
+  text-decoration: underline;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   SCROLLBAR STYLING
+──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--bg3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--bg4);
+}
+
+/* ────────────────────────────────────────────────────────────────
+   MODAL & DIALOG
+──────────────────────────────────────────────────────────────── */
+.modal {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal.active {
+  display: flex;
+}
+
+.modal-content {
+  background: var(--bg1);
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 500px;
+  width: 90%;
+  max-height: 80vh;
+  overflow-y: auto;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.15);
+}
+
+.modal-header {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text1);
+  margin-bottom: 16px;
+}
+
+.modal-body {
+  font-size: 14px;
+  color: var(--text1);
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.btn {
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg2);
+  color: var(--text1);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: inherit;
+}
+
+.btn:hover {
+  background: var(--bg3);
+}
+
+.btn.primary {
+  background: var(--blue);
+  color: white;
+  border-color: var(--blue);
+}
+
+.btn.primary:hover {
+  background: var(--blue2);
+  border-color: var(--blue2);
+}
+
+.btn.danger {
+  background: var(--red);
+  color: white;
+  border-color: var(--red);
+}
+
+.btn.danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   UTILITY & LOADING
+──────────────────────────────────────────────────────────────── */
+.loading {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--text2);
+  animation: dot-pulse 1.4s infinite;
+  margin: 0 1.5px;
+}
+
+@keyframes dot-pulse {
+  0%, 60%, 100% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+
+.hidden {
+  display: none !important;
+}
+
+.text-muted {
+  color: var(--text3);
+}
+
+.text-center {
+  text-align: center;
+}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">Cowork<em>Remote</em></div>
+    <button class="new-chat-btn" id="newChatBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 5v14m7-7H5"></path></svg>
+      New Chat
+    </button>
+  </div>
+  <div class="sidebar-list" id="sidebarList"></div>
+  <div class="sidebar-footer">
+    <button id="exportBtn" title="Export all data as JSON">Export</button>
+    <button id="importBtn" title="Import data from JSON file">Import</button>
+  </div>
+</div>
+
+<div class="main-container">
+  <div class="top-bar">
+    <div class="top-bar-title" id="topBarTitle">New Chat</div>
+  </div>
+
+  <div class="chat-container">
+    <div class="messages" id="messages"></div>
+  </div>
+
+  <div class="input-section">
+    <div class="input-wrapper">
+      <textarea class="input-field" id="messageInput" placeholder="Type your message here..." rows="1"></textarea>
+      <button class="send-btn" id="sendBtn">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.6915026,12.4744748 L3.50612381,13.2599618 C3.19218622,13.2599618 3.03521743,13.4170592 3.03521743,13.5741566 L1.15159189,20.0151496 C0.8376543,20.8006365 0.99,21.89 1.77946707,22.52 C2.41,22.99 3.50612381,23.1 4.13399899,22.8429026 L21.714504,14.0454487 C22.6563168,13.5741566 23.1272231,12.6315722 22.9702544,11.6889879 C22.9702544,11.6889879 22.9702544,11.5318905 22.9702544,11.4748131 L22.9702544,11.4748131 C22.9702544,11.3177157 22.9702544,11.1606183 22.9702544,11.1035409 C23.1272231,10.1609565 22.6563168,9.21837215 21.714504,8.74707722 L4.13399899,0.5 C3.34915502,0.242893617 2.40734225,0.3999910 1.77946707,0.9543849 C0.994623095,1.5087788 0.837654326,2.60795861 1.15159189,3.39344554 L3.03521743,9.83443849 C3.03521743,10.0515359 3.19218622,10.2086333 3.50612381,10.2086333 L16.6915026,11.0541202 C16.6915026,11.0541202 17.1624089,11.0541202 17.1624089,11.4748131 C17.1624089,11.7319105 16.6915026,12.4744748 16.6915026,12.4744748 Z"></path></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<div class="right-sidebar">
+  <div class="right-header">
+    <h3>Info</h3>
+  </div>
+  <div class="right-content" id="rightContent">
+    <div class="info-block">
+      <div class="info-label">Status</div>
+      <div class="info-value" id="statusValue">Waiting...</div>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-content">
+    <div class="modal-header" id="modalHeader">Modal</div>
+    <div class="modal-body" id="modalBody">Modal content</div>
+    <div class="modal-footer">
+      <button class="btn" id="modalCloseBtn">Close</button>
+      <button class="btn primary" id="modalOkBtn" style="display:none;">OK</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ──────────────────────────────────────────────────────────────
+// DATA STORAGE
+// ──────────────────────────────────────────────────────────────
+const DB_KEY = 'cowork-remote-chats';
+let chats = [];
+let currentChatId = null;
+
+// Load chats from localStorage
+function loadChats() {
+  const data = localStorage.getItem(DB_KEY);
+  if (data) {
+    try {
+      chats = JSON.parse(data);
+    } catch (e) {
+      console.error('Failed to load chats:', e);
+      chats = [];
+    }
+  }
+}
+
+// Save chats to localStorage
+function saveChats() {
+  localStorage.setItem(DB_KEY, JSON.stringify(chats));
+}
+
+// ──────────────────────────────────────────────────────────────
+// CHAT MANAGEMENT
+// ──────────────────────────────────────────────────────────────
+function createNewChat() {
+  const newChat = {
+    id: Date.now().toString(),
+    title: 'New Chat',
+    messages: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  chats.unshift(newChat);
+  saveChats();
+  selectChat(newChat.id);
+}
+
+function selectChat(chatId) {
+  currentChatId = chatId;
+  renderChatList();
+  renderMessages();
+  updateTopBar();
+  document.getElementById('messageInput').focus();
+}
+
+function deleteChat(chatId) {
+  if (chats.length === 1) {
+    showModal('Cannot Delete', 'You must keep at least one chat.', false);
+    return;
+  }
+  chats = chats.filter(c => c.id !== chatId);
+  saveChats();
+  if (currentChatId === chatId) {
+    currentChatId = chats[0].id;
+  }
+  renderChatList();
+  renderMessages();
+  updateTopBar();
+}
+
+function updateChatTitle(chatId, title) {
+  const chat = chats.find(c => c.id === chatId);
+  if (chat) {
+    chat.title = title;
+    chat.updatedAt = new Date().toISOString();
+    saveChats();
+    renderChatList();
+    updateTopBar();
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// MESSAGE HANDLING
+// ──────────────────────────────────────────────────────────────
+function addMessage(chatId, role, content) {
+  const chat = chats.find(c => c.id === chatId);
+  if (!chat) return;
+
+  chat.messages.push({
+    role,
+    content,
+    timestamp: new Date().toISOString()
+  });
+  chat.updatedAt = new Date().toISOString();
+  saveChats();
+
+  if (chatId === currentChatId) {
+    renderMessages();
+    // Auto-scroll to bottom
+    const messagesEl = document.getElementById('messages');
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+}
+
+function getCurrentChat() {
+  return chats.find(c => c.id === currentChatId);
+}
+
+// ──────────────────────────────────────────────────────────────
+// UI RENDERING
+// ──────────────────────────────────────────────────────────────
+function renderChatList() {
+  const list = document.getElementById('sidebarList');
+  list.innerHTML = '';
+
+  chats.forEach(chat => {
+    const item = document.createElement('div');
+    item.className = 'chat-item' + (chat.id === currentChatId ? ' active' : '');
+    item.innerHTML = `
+      <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+      <span class="text">${escapeHtml(chat.title)}</span>
+      <button class="delete-btn" title="Delete chat">×</button>
+    `;
+
+    item.addEventListener('click', (e) => {
+      if (e.target.closest('.delete-btn')) {
+        deleteChat(chat.id);
+      } else {
+        selectChat(chat.id);
+      }
+    });
+
+    list.appendChild(item);
+  });
+}
+
+function renderMessages() {
+  const messagesEl = document.getElementById('messages');
+  const chat = getCurrentChat();
+  
+  if (!chat) {
+    messagesEl.innerHTML = '<div class="text-center text-muted">No chat selected</div>';
+    return;
+  }
+
+  if (chat.messages.length === 0) {
+    messagesEl.innerHTML = '<div class="text-center text-muted">No messages yet</div>';
+    return;
+  }
+
+  messagesEl.innerHTML = '';
+
+  chat.messages.forEach(msg => {
+    const group = document.createElement('div');
+    group.className = 'message-group ' + msg.role;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar ' + msg.role;
+    avatar.textContent = msg.role === 'user' ? 'U' : 'A';
+
+    const content = document.createElement('div');
+    content.className = 'message-content';
+
+    const bubble = document.createElement('div');
+    bubble.className = 'message-bubble ' + msg.role;
+    bubble.textContent = msg.content;
+
+    content.appendChild(bubble);
+
+    if (msg.role === 'user') {
+      group.appendChild(content);
+      group.appendChild(avatar);
+    } else {
+      group.appendChild(avatar);
+      group.appendChild(content);
+    }
+
+    messagesEl.appendChild(group);
+  });
+}
+
+function updateTopBar() {
+  const chat = getCurrentChat();
+  const title = document.getElementById('topBarTitle');
+  title.textContent = chat ? chat.title : 'New Chat';
+}
+
+// ──────────────────────────────────────────────────────────────
+// MODAL
+// ──────────────────────────────────────────────────────────────
+function showModal(header, body, showOk = true) {
+  const modal = document.getElementById('modal');
+  document.getElementById('modalHeader').textContent = header;
+  document.getElementById('modalBody').textContent = body;
+  document.getElementById('modalOkBtn').style.display = showOk ? 'block' : 'none';
+  modal.classList.add('active');
+}
+
+function closeModal() {
+  const modal = document.getElementById('modal');
+  modal.classList.remove('active');
+}
+
+// ──────────────────────────────────────────────────────────────
+// UTILITY
+// ──────────────────────────────────────────────────────────────
+function escapeHtml(text) {
+  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
+  return text.replace(/[&<>"']/g, m => map[m]);
+}
+
+function downloadJSON(data, filename) {
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename || 'export.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ──────────────────────────────────────────────────────────────
+// EVENT LISTENERS
+// ──────────────────────────────────────────────────────────────
+document.getElementById('newChatBtn').addEventListener('click', createNewChat);
+
+document.getElementById('sendBtn').addEventListener('click', () => {
+  const input = document.getElementById('messageInput');
+  const message = input.value.trim();
+  if (!message) return;
+
+  if (!currentChatId) {
+    createNewChat();
+  }
+
+  addMessage(currentChatId, 'user', message);
+  input.value = '';
+  input.style.height = 'auto';
+
+  // Simulate assistant response
+  setTimeout(() => {
+    const responses = [
+      'That is interesting. Tell me more.',
+      'I understand. How can I help you further?',
+      'That makes sense. What would you like to do?',
+      'Got it. Anything else on your mind?'
+    ];
+    const response = responses[Math.floor(Math.random() * responses.length)];
+    addMessage(currentChatId, 'assistant', response);
+  }, 500);
+});
+
+document.getElementById('messageInput').addEventListener('keypress', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    document.getElementById('sendBtn').click();
+  }
+});
+
+document.getElementById('messageInput').addEventListener('input', (e) => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+});
+
+document.getElementById('exportBtn').addEventListener('click', () => {
+  const timestamp = new Date().toISOString().slice(0, 10);
+  downloadJSON(chats, `cowork-remote-${timestamp}.json`);
+});
+
+document.getElementById('importBtn').addEventListener('click', () => {
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.json';
+  input.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const importedData = JSON.parse(event.target.result);
+        if (Array.isArray(importedData)) {
+          chats = importedData;
+          saveChats();
+          if (chats.length > 0) {
+            currentChatId = chats[0].id;
+          }
+          renderChatList();
+          renderMessages();
+          updateTopBar();
+          showModal('Import Successful', 'Data imported successfully.', false);
+        } else {
+          showModal('Import Error', 'Invalid file format. Please select a valid JSON file.', false);
+        }
+      } catch (err) {
+        showModal('Import Error', 'Failed to parse JSON: ' + err.message, false);
+      }
+    };
+    reader.readAsText(file);
+  });
+  input.click();
+});
+
+document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+document.getElementById('modalOkBtn').addEventListener('click', closeModal);
+
+window.addEventListener('click', (e) => {
+  const modal = document.getElementById('modal');
+  if (e.target === modal) {
+    closeModal();
+  }
+});
+
+// ──────────────────────────────────────────────────────────────
+// INITIALIZATION
+// ──────────────────────────────────────────────────────────────
+loadChats();
+if (chats.length === 0) {
+  createNewChat();
+} else {
+  currentChatId = chats[0].id;
+  renderChatList();
+  renderMessages();
+  updateTopBar();
+}
+
+const statusEl = document.getElementById('statusValue');
+if (statusEl) {
+  statusEl.textContent = chats.length + ' chat(s)';
+}
+</script>
+
+</body>
+</html>--bg4);
   color: var(--text1);
   border-color: rgba(217,119,6,.5);
 }
@@ -166,7 +1048,106 @@ body {
   color: var(--text3);
 }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-.dot.on  { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.6); }
+.dot.on { background: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.6); }
+.dot.off { background: var(--red); }
+.dot.wait { background: var(--orange); animation: blink 1.5s ease-in-out infinite; }
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+/* ────────────────────────────────────────────────────────────────
+   CENTER CHAT
+──────────────────────────────────────────────────────────────── */
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg0);
+}
+
+.chat-topbar {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.chat-topbar-title {
+  flex: 1;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.model-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text3);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 3px 9px;
+  border-radius: 12px;
+  flex-shrink: 0;
+  cursor: default;
+}
+.model-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+
+/* Messages scroll area */
+.messages-wrap {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.messages-wrap::-webkit-scrollbar { width: 5px; }
+.messages-wrap::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
+
+/* Welcome */
+.chat-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  color: var(--text3);
+  padding: 40px;
+  text-align: center;
+}
+.claude-circle {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #d97706, #ea580c);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  color: #fff;
+  font-weight: 800;
+  flex-shrink: 0;
+  margin-bottom: 2px;
+}
+.chat-welcome h2 { font-size: 18px; font-weight: 500; color: var(--text2); }
+.chat-welcome p { font-size: 13px; color: var(--text3); line-height: 1.75; max-width: 340px; }
+.chat-welcome .hint {
+  font-size: 12px;
+  color: var(--text3);
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 5px 12px;
+  border-radius: 20px;
+  margin-top: 4px;
+}
+
+/* Messages */
+.messtestkground: var(--green); box-shadow: 0 0 5px rgba(34,197,94,.6); }
 .dot.off { background: var(--red); }
 .dot.wait { background: var(--orange); animation: blink 1.5s ease-in-out infinite; }
 @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
@@ -285,7 +1266,7 @@ body {
   align-items: flex-start;
   gap: 10px;
 }
-.msg-row.user-row  { flex-direction: row-reverse; }
+.msg-row.user-row { flex-direction: row-reverse; }
 .msg-av {
   width: 28px;
   height: 28px;
@@ -298,8 +1279,8 @@ body {
   font-weight: 700;
   margin-top: 2px;
 }
-.msg-av.user-av  { background: var(--blue);   color: #fff; }
-.msg-av.ai-av    { background: linear-gradient(135deg,#d97706,#ea580c); color: #fff; }
+.msg-av.user-av { background: var(--blue); color: #fff; }
+.msg-av.ai-av { background: linear-gradient(135deg,#d97706,#ea580c); color: #fff; }
 .msg-bubble {
   max-width: calc(100% - 42px);
   padding: 10px 14px;
@@ -465,672 +1446,170 @@ body {
   cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
-  transition: background .15s;
+  transition: background .12s;
 }
-.send-btn:hover { background: var(--accent2); }
-.send-btn:disabled { background: var(--bg3); cursor: not-allowed; opacity: .5; }
-.send-btn svg { width: 16px; height: 16px; fill: #fff; }
+.send-btn:hover:not(:disabled) { background: var(--accent2); }
+.send-btn:disabled { opacity: .5; cursor: not-allowed; }
+.send-btn svg { width: 16px; height: 16px; }
 
-/* ─────────────────────────────────────────
-   RIGHT PANEL
-───────────────────────────────────────── */
-.right-panel {
+/* ────────────────────────────────────────────────────────────────
+   RIGHT SIDEBAR
+──────────────────────────────────────────────────────────────── */
+.right-sidebar {
   width: var(--right-w);
   background: var(--bg1);
   border-left: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-.rp-top {
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.rp-top-title { font-size: 12.5px; font-weight: 600; color: var(--text2); flex: 1; }
-.rp-badge {
-  font-size: 10.5px;
-  color: var(--text3);
-  background: var(--bg3);
-  padding: 2px 7px;
-  border-radius: 10px;
-}
-.rp-scroll {
-  flex: 1;
   overflow-y: auto;
-  padding: 8px 0;
+  flex-shrink: 0;
 }
-.rp-scroll::-webkit-scrollbar { width: 3px; }
-.rp-scroll::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 3px; }
 
-.rp-sec { padding-bottom: 8px; border-bottom: 1px solid var(--border); margin-bottom: 0; }
-.rp-sec:last-child { border-bottom: none; }
-.rp-sec-title {
-  padding: 8px 14px 4px;
+.right-sidebar header {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text1);
+  flex-shrink: 0;
+  background: var(--bg1);
+}
+
+.right-sidebar .content {
+  padding: 12px 14px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ri {
+  margin-bottom: 14px;
+}
+
+.ri-label {
   font-size: 10px;
   font-weight: 700;
   color: var(--text3);
   text-transform: uppercase;
-  letter-spacing: .5px;
+  letter-spacing: .4px;
+  margin-bottom: 5px;
 }
 
-/* Steps */
-.step-list { padding: 0 10px; display: flex; flex-direction: column; gap: 1px; }
-.step-item {
+.ri-value {
+  font-size: 12px;
+  color: var(--text2);
+  word-break: break-word;
+  line-height: 1.5;
+}
+
+.ri-value a {
+  color: var(--blue);
+  text-decoration: none;
+}
+
+.ri-value a:hover {
+  text-decoration: underline;
+}
+
+/* ────────────────────────────────────────────────────────────────
+   IMAGE VIEWER MODAL
+──────────────────────────────────────────────────────────────── */
+.img-modal {
+  display: none;
+  position: fixed;
+  z-index: 2000;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0,0,0,0.7);
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn .2s;
+}
+
+.img-modal.active {
   display: flex;
-  align-items: flex-start;
-  gap: 6px;
-  padding: 3px 5px;
-  border-radius: 5px;
-  font-size: 11.5px;
+}
+
+.img-modal-content {
+  max-width: 90%;
+  max-height: 90%;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  position: relative;
+}
+
+.img-modal-content img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 12px;
+}
+
+.img-modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  background: rgba(0,0,0,0.5);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: background .2s;
+}
+
+.img-modal-close:hover {
+  background: rgba(0,0,0,0.7);
+}
+
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ────────────────────────────────────────────────────────────────
+   RIGHT SIDEBAR - INFO TABLE
+──────────────────────────────────────────────────────────────── */
+.info-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.info-table td {
+  padding: 4px 0;
+  border: none;
+}
+
+.info-table td:first-child {
   color: var(--text3);
-  line-height: 1.4;
-  transition: background .1s;
-}
-.step-item.active { color: var(--text1); background: rgba(0,0,0,0.10); }
-.step-icon { flex-shrink: 0; width: 14px; text-align: center; margin-top: 1px; font-size: 11px; }
-.step-text { flex: 1; word-break: break-all; }
-.step-empty { padding: 6px 14px; font-size: 11.5px; color: var(--text3); }
-
-/* Project */
-.rp-project {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 6px 10px;
-  margin: 2px 5px;
-  border-radius: 7px;
-  cursor: default;
-}
-.rp-project:hover { background: var(--bg2); }
-.proj-ico {
-  width: 30px; height: 30px;
-  background: var(--bg3);
-  border-radius: 6px;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 15px;
-  flex-shrink: 0;
-}
-.proj-name { font-size: 12.5px; font-weight: 500; color: var(--text1); }
-.proj-sub  { font-size: 11px; color: var(--text3); }
-
-/* Files */
-.file-list { padding: 2px 8px; display: flex; flex-direction: column; gap: 1px; }
-.rp-file {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 7px;
-  border-radius: 6px;
-  cursor: default;
-  color: var(--text2);
-  font-size: 12px;
-  transition: background .1s;
-}
-.rp-file:hover { background: var(--bg2); }
-.rp-file-ico { font-size: 13px; flex-shrink: 0; }
-.rp-file-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rp-file-badge {
+  font-weight: 600;
+  width: 35%;
+  text-transform: uppercase;
   font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: rgba(34,197,94,.12);
-  color: var(--green);
-  flex-shrink: 0;
+  letter-spacing: .3px;
+  padding-right: 8px;
+  vertical-align: top;
 }
 
-/* Connectors */
-.conn-list { padding: 4px 12px; display: flex; flex-direction: column; gap: 5px; }
-.conn-chip {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  padding: 6px 10px;
-  border-radius: 7px;
-  font-size: 12px;
-  color: var(--text2);
-}
-.conn-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text3); flex-shrink: 0; }
-.conn-dot.on   { background: var(--green); box-shadow: 0 0 4px rgba(34,197,94,.5); }
-.conn-dot.off  { background: var(--red); }
-.conn-dot.wait { background: var(--orange); animation: blink 1.5s ease-in-out infinite; }
-.conn-name { flex: 1; }
-.conn-status { font-size: 10.5px; color: var(--text3); }
-
-/* ─────────────────────────────────────────
-   OVERLAYS
-───────────────────────────────────────── */
-.lightbox {
-  display: none; position: fixed; inset: 0;
-  background: rgba(0,0,0,.85); z-index: 1000;
-  align-items: center; justify-content: center;
-}
-.lightbox.show { display: flex; }
-.lightbox img { max-width: 92vw; max-height: 92vh; border-radius: 8px; cursor: zoom-out; }
-
-.toast {
-  position: fixed; bottom: 20px; left: 50%;
-  transform: translateX(-50%) translateY(20px);
-  background: var(--bg3); border: 1px solid var(--border);
-  color: var(--text1); padding: 8px 18px;
-  border-radius: 20px; font-size: 12.5px;
-  opacity: 0; pointer-events: none;
-  transition: all .25s; white-space: nowrap; z-index: 999;
-}
-.toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--bg4); border-radius: 4px; }
-
-    .msg-file-chip { display:inline-flex; align-items:center; gap:6px; background:var(--bg2); border:1px solid var(--border); border-radius:8px; padding:4px 10px; font-size:12px; color:var(--text2); margin-bottom:4px; }
-    .msg-file-chip .file-icon { font-size:14px; }
-    .msg-file-chip .file-name { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .msg-file-chip .file-size { color:var(--text3); font-size:11px; }
-    .upload-status { display:flex; align-items:center; gap:8px; padding:8px 14px; margin:4px 0; background:var(--bg2); border-radius:10px; font-size:12px; color:var(--text2); border-left:3px solid var(--accent); }
-    .upload-status.success { border-left-color:var(--green); }
-    .upload-status.error { border-left-color:var(--red); }
-    .thinking-indicator { display:flex; align-items:center; gap:8px; padding:10px 14px; color:var(--text2); font-size:13px; }
-    .thinking-dots { display:inline-flex; gap:3px; }
-    .thinking-dots span { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:dotPulse 1.4s infinite; }
-    .thinking-dots span:nth-child(2) { animation-delay:0.2s; }
-    .thinking-dots span:nth-child(3) { animation-delay:0.4s; }
-    @keyframes dotPulse { 0%,80%,100%{opacity:.3;transform:scale(.8)} 40%{opacity:1;transform:scale(1)} }
-    .msg-attach-row { display:flex; flex-wrap:wrap; gap:4px; margin-bottom:6px; }
-    
-.file-download-btn {
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  background:var(--accent);
-  color:white;
-  border:none;
-  border-radius:8px;
-  padding:6px 12px;
-  font-size:12px;
-  cursor:pointer;
-  text-decoration:none;
-  margin:2px;
-  transition:background 0.2s;
-}
-.file-download-btn:hover {
-  background:var(--accent2);
-}
-.file-download-btn .dl-icon {
-  font-size:14px;
-}
-.file-download-btn .dl-text {
-  font-weight: 500;
-}
-.file-download-btn .dl-name {
-  font-size:11px;
-  opacity:0.9;
-}
-</style>
-</head>
-<body>
-
-<!-- ═══════════════════════════════
-     LEFT SIDEBAR
-═══════════════════════════════ -->
-<aside class="sidebar">
-  <div class="sidebar-header">
-    <div class="logo">Cowork <em>Remote</em></div>
-    <button class="new-chat-btn" onclick="createNewChat()">
-      <svg viewBox="0 0 24 24" fill="none" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
-      새 대화
-    </button>
-  </div>
-
-  <div class="search-wrap">
-    <input class="search-input" type="text" placeholder="대화 검색..."
-           id="chatSearch" oninput="filterChats(this.value)">
-  </div>
-
-  <div class="chat-list" id="chatList">
-    <div class="cl-section-label">최근 대화</div>
-  </div>
-
-  <div class="sidebar-footer">
-    <div class="status-row">
-      <div class="dot wait" id="dotRelay"></div>
-      <span id="lblRelay">릴레이 확인 중...</span>
-    </div>
-    <div class="status-row">
-      <div class="dot wait" id="dotBridge"></div>
-      <span id="lblBridge">브릿지 확인 중...</span>
-    </div>
-  </div>
-</aside>
-
-<!-- ═══════════════════════════════
-     CENTER CHAT
-═══════════════════════════════ -->
-<main class="chat-main">
-  <div class="chat-topbar">
-    <div class="chat-topbar-title" id="chatTitle">새 대화</div>
-    <div class="model-chip">
-      <div class="model-dot"></div>
-      Claude Sonnet
-    </div>
-  </div>
-
-  <div class="messages-wrap" id="messagesWrap">
-    <!-- Welcome state -->
-    <div class="chat-welcome" id="chatWelcome">
-      <div class="claude-circle">C</div>
-      <h2>안녕하세요!</h2>
-      <p>회사 PC와 연결하여 파일 작업, RPA 자동화,<br>문서 편집 등을 처리할 수 있습니다.</p>
-      <div class="hint">💡 메시지 입력 또는 파일을 첨부하세요</div>
-    </div>
-
-    <!-- Active messages -->
-    <div class="messages" id="msgContainer" style="display:none"></div>
-  </div>
-
-  <!-- Typing indicator -->
-  <div class="typing-wrap" id="typingWrap">
-    <div class="typing-dots"><span></span><span></span><span></span></div>
-    <span>Claude가 응답 중...</span>
-  </div>
-
-  <!-- Input area -->
-  <div class="input-area">
-    <div class="attach-preview" id="attachRow"></div>
-    <div class="input-box">
-      <div class="input-left">
-        <button class="iact" title="파일 첨부" onclick="document.getElementById('fileInput').click()">📎</button>
-        <button class="iact" title="스크린샷 요청" onclick="requestScreenshot()">🖼️</button>
-        <input type="file" id="fileInput" multiple style="display:none" onchange="handleFileInput(this)">
-      </div>
-      <textarea
-        class="msg-input"
-        id="msgInput"
-        placeholder="메시지를 입력하세요... (Shift+Enter로 줄바꿈)"
-        rows="1"
-      ></textarea>
-      <button class="send-btn" id="sendBtn" onclick="sendMessage()">
-        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-      </button>
-    </div>
-  </div>
-</main>
-
-<!-- ═══════════════════════════════
-     RIGHT PANEL
-═══════════════════════════════ -->
-<aside class="right-panel">
-  <div class="rp-top">
-    <div class="rp-top-title">진행 상황</div>
-    <div class="rp-badge" id="rpBadge">—</div>
-  </div>
-  <div class="rp-scroll">
-
-    <!-- Steps -->
-    <div class="rp-sec">
-      <div class="rp-sec-title">작업 단계</div>
-      <div class="step-list" id="rpStepList">
-        <div class="step-empty">작업이 시작되면 단계별 진행이 표시됩니다.</div>
-      </div>
-    </div>
-
-    <!-- Project -->
-    <div class="rp-sec">
-      <div class="rp-sec-title">프로젝트</div>
-      <div class="rp-project">
-        <div class="proj-ico">🏢</div>
-        <div>
-          <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v4</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Files -->
-    <div class="rp-sec" id="rpFileSec" style="display:none">
-      <div class="rp-sec-title">파일</div>
-      <div class="file-list" id="rpFileList"></div>
-    </div>
-
-    <!-- Connectors -->
-    <div class="rp-sec">
-      <div class="rp-sec-title">컨텍스트</div>
-      <div class="rp-sec-title" style="padding-top:3px;">커넥터</div>
-      <div class="conn-list">
-        <div class="conn-chip">
-          <div class="conn-dot wait" id="connDotRelay"></div>
-          <span class="conn-name">Relay</span>
-          <span class="conn-status" id="connLblRelay">확인 중</span>
-        </div>
-        <div class="conn-chip">
-          <div class="conn-dot wait" id="connDotBridge"></div>
-          <span class="conn-name">Bridge (회사 PC)</span>
-          <span class="conn-status" id="connLblBridge">확인 중</span>
-        </div>
-      </div>
-    </div>
-
-  </div>
-</aside>
-
-<!-- Lightbox -->
-<div class="lightbox" id="lightbox" onclick="this.classList.remove('show')">
-  <img id="lightboxImg" src="" alt="">
-</div>
-
-<!-- Toast -->
-<div class="toast" id="toast"></div>
-
-<script>
-/* ════════════════════════════════════════
-   CONFIG & STATE
-════════════════════════════════════════ */
-const SUPA_URL = 'https://rnnigyfzwlgojxyccgsm.supabase.co';
-const SUPA_KEY = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const sb       = supabase.createClient(SUPA_URL, SUPA_KEY);
-
-let chatId      = null;
-let relayOnline = false;
-let bridgeOnline= false;
-let waiting     = false;
-let pollTimer   = null;
-let rtChannel   = null;
-let attachments = [];
-let chatHistory = [];   // [{id, title, updated}]
-let msgCount    = 0;
-let chatIndex   = {};
-
-/* ════════════════════════════════════════
-   SUPABASE REST HELPERS
-════════════════════════════════════════ */
-async function sgRaw(table, qs) {
-  const r = await fetch(`${SUPA_URL}/rest/v1/${table}?${qs}`, {
-    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-async function sp(table, data) {
-  const r = await sb.from(table).upsert(data);
-  if (r.error) throw r.error;
-  return r.data;
-}
-async function bridgeExec(action, content, timeout = 30000) {
-  const id = 'cmd-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-  await sp('commands', { id, action, target: '', content, status: 'pending' });
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 1500));
-    const rows = await sgRaw('commands', `id=eq.${id}&select=status,result`);
-    if (rows.length && (rows[0].status === 'completed' || rows[0].status === 'error')) {
-      sb.from('commands').delete().eq('id', id).then(() => {});
-      return { ok: rows[0].status === 'completed', data: rows[0].result || '' };
-    }
-  }
-  return { ok: false, data: '(timeout)' };
+.info-table td:last-child {
+  color: var(--text1);
+  word-break: break-word;
+  word-wrap: break-word;
 }
 
-/* ════════════════════════════════════════
-   CHAT HISTORY  (localStorage)
-════════════════════════════════════════ */
-function loadHistory() {
-  try { chatHistory = JSON.parse(localStorage.getItem('cwHistory') || '[]'); }
-  catch(e) { chatHistory = []; }
-  renderChatList();
-}
-function upsertHistory(id, title) {
-  const i = chatHistory.findIndex(c => c.id === id);
-  if (i >= 0) { chatHistory[i].title = title; chatHistory[i].updated = Date.now(); }
-  else chatHistory.unshift({ id, title, updated: Date.now() });
-  if (chatHistory.length > 60) chatHistory.length = 60;
-  localStorage.setItem('cwHistory', JSON.stringify(chatHistory));
-  renderChatList();
-}
-function renderChatList(filter = '') {
-  const list = document.getElementById('chatList');
-  const label = list.querySelector('.cl-section-label');
-  list.innerHTML = '';
-  if (label) list.appendChild(label);
-
-  const items = filter
-    ? chatHistory.filter(c => c.title.toLowerCase().includes(filter.toLowerCase()))
-    : chatHistory;
-
-  if (!items.length) {
-    const d = document.createElement('div');
-    d.className = 'cl-empty';
-    d.textContent = filter ? '검색 결과 없음' : '대화 기록이 없습니다';
-    list.appendChild(d); return;
-  }
-  items.forEach(c => {
-    const d = document.createElement('div');
-    d.className = 'cl-item' + (c.id === chatId ? ' active' : '');
-    d.innerHTML = `<span class="cl-item-icon">💬</span><span class="cl-item-title">${esc(c.title)}</span><span class="cl-item-time">${relTime(c.updated)}</span>`;
-    d.onclick = () => loadChat(c.id, c.title);
-    list.appendChild(d);
-  });
-}
-function filterChats(v) { renderChatList(v); }
-function relTime(ts) {
-  const d = Date.now() - ts;
-  if (d < 60000) return '방금';
-  if (d < 3600000) return Math.floor(d/60000) + '분';
-  if (d < 86400000) return Math.floor(d/3600000) + '시간';
-  return Math.floor(d/86400000) + '일';
+.info-table a {
+  color: var(--blue);
+  text-decoration: none;
+  word-break: break-all;
 }
 
-/* ════════════════════════════════════════
-   CHAT SWITCHING
-════════════════════════════════════════ */
-async function loadChat(id, title) {
-  chatId = id;
-  document.getElementById('chatTitle').textContent = title || id;
-  document.getElementById('chatWelcome').style.display = 'none';
-  document.getElementById('msgContainer').style.display = 'flex';
-  document.getElementById('msgContainer').innerHTML = '';
-  attachments = []; renderAttachRow();
-  stopPolling(); resetProgress();
-  renderChatList();
-  try {
-    const msgs = await sgRaw('messages',
-      `chat_id=eq.${id}&order=created_at.asc&select=id,role,content,status,created_at`);
-    msgs.forEach(m => appendMsg(m));
-    scrollBot();
-  } catch(e) { console.error(e); }
-  setupRealtime();
-  startPolling(5000);
+.info-table a:hover {
+  text-decoration: underline;
 }
-
-/* ════════════════════════════════════════
-   NEW CHAT
-════════════════════════════════════════ */
-function createNewChat() {
-  chatId = 'chat-' + Math.random().toString(36).slice(2,10);
-  document.getElementById('chatTitle').textContent = '새 대화';
-  document.getElementById('chatWelcome').style.display = 'flex';
-  document.getElementById('msgContainer').style.display = 'none';
-  document.getElementById('msgContainer').innerHTML = '';
-  attachments = []; renderAttachRow();
-  setWaiting(false); stopPolling(); resetProgress();
-  renderChatList();
-  setupRealtime();
-}
-
-/* ════════════════════════════════════════
-   SEND MESSAGE
-════════════════════════════════════════ */
-async function extractPptxText(file) {
-  if (typeof JSZip === 'undefined') return null;
-  try {
-    const zip = await JSZip.loadAsync(file);
-    const slideFiles = Object.keys(zip.files)
-      .filter(n => /^ppt\/slides\/slide\d+\.xml$/.test(n))
-      .sort((a,b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
-    if (slideFiles.length === 0) return null;
-    let text = '';
-    for (const sf of slideFiles) {
-      const xml = await zip.files[sf].async('text');
-      const num = sf.match(/slide(\d+)/)[1];
-      text += '=== Slide ' + num + ' ===\n';
-      const paras = xml.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) || [];
-      for (const para of paras) {
-        const runs = para.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [];
-        const line = runs.map(t => t.replace(/<[^>]+>/g,'')).join('').trim();
-        if (line) text += line + '\n';
-      }
-      text += '\n';
-    }
-    return text.trim() || null;
-  } catch(e) { console.warn('JSZip failed (DRM?):', e.message); return null; }
-}
-
-
-async function showEPLoginModal() {
-  return new Promise((resolve) => {
-    const div = document.createElement('div');
-    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">⚠️ EP 로그인 필요</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM 보호 파일을 열기 위해 회사 <b>EP(포스코)</b> 로그인이 필요합니다.</p><ol style="padding-left:18px;margin-top:8px"><li>회사 PC에서 EP에 로그인하세요</li><li>ECM 연결 상태가 <b>정상</b>인지 확인하세요</li><li>준비되면 아래 <b>계속 진행</b>을 클릭하세요</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px">취소</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">계속 진행</button></div></div></div>';
-    document.body.appendChild(div);
-    const done = (v) => { div.remove(); resolve(v); };
-    document.getElementById('epContBtn').onclick = () => done(true);
-    document.getElementById('epCancelBtn').onclick = () => done(false);
-  });
-}
-
-async function triggerDrmDeprotect(msgId, fileName) {
-      const ext = '.' + fileName.split('.').pop().toLowerCase();
-      const safeFn = fileName.replace(/['"\\]/g, '_');
-      const cmdId = 'drm-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-      const port = 7655;
-
-      const psLines = [
-        '& {',
-        '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
-        "$ErrorActionPreference = 'Continue'",
-        "$supaUrl = '" + SUPA_URL + "'",
-        "$supaKey = '" + SUPA_KEY + "'",
-        "$msgId = '" + msgId + "'",
-        "$fileName = '" + safeFn + "'",
-        "$ext = '" + ext + "'",
-        "$ts = Get-Date -f 'yyyyMMddHHmmssfff'",
-        "$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ('drm_src_' + $ts + $ext))",
-        "$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ('drm_out_' + $ts + '.pdf'))",
-        "$hdrs = @{apikey=$supaKey; Authorization='Bearer ' + $supaKey}",
-        "$qM = [Uri]::EscapeDataString($msgId); $qF = [Uri]::EscapeDataString($fileName)",
-        '# STEP A: Download DRM file from Supabase (GET only - no writes to Supabase from PS)',
-        "$rows = Invoke-RestMethod -Uri ($supaUrl+'/rest/v1/file_chunks?message_id=eq.'+$qM+'&file_name=eq.'+$qF+'&order=chunk_index.asc') -Headers $hdrs",
-        "if (-not $rows -or $rows.Count -eq 0) { Write-Output ('FAIL:NoChunks:' + $msgId); return }",
-        "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
-        '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
-        '# STEP B: COM DRM removal in background job - detects EP login dialog (FED5)',
-        '$comJob = Start-Job -ScriptBlock {',
-        '  param($src,$out,$ext)',
-        '  $ErrorActionPreference = "Stop"',
-        '  try {',
-        "    if (\$ext -eq '.pptx' -or \$ext -eq '.ppt') {",
-        '      Stop-Process -Name POWERPNT -Force -EA 0; Start-Sleep 1',
-        '      $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
-        '      $pres = $app.Presentations.Open($src, 0, 0, 1); Start-Sleep 5',
-        '      $pres.ExportAsFixedFormat($out, 2, 1); $pres.Close(); $app.Quit()',
-        "    } elseif (\$ext -eq '.xlsx' -or \$ext -eq '.xls') {",
-        '      Stop-Process -Name EXCEL -Force -EA 0; Start-Sleep 1',
-        '      $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
-        '      $wb = $app.Workbooks.Open($src); Start-Sleep 3',
-        '      $wb.ExportAsFixedFormat(0, $out); $wb.Close($false); $app.Quit()',
-        "    } elseif (\$ext -eq '.docx' -or \$ext -eq '.doc') {",
-        '      Stop-Process -Name WINWORD -Force -EA 0; Start-Sleep 1',
-        '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
-        '      $wDoc = $app.Documents.Open($src, 0, 0); Start-Sleep 3',
-        '      $wDoc.ExportAsFixedFormat($out, 17, 0); $wDoc.Close($false); $app.Quit()',
-        "    } else { throw 'Unsupported: ' + \$ext }",
-        "    Write-Output 'COM_DONE'",
-        '  } catch {',
-        "    Write-Output ('COM_FAIL:' + \$_.Exception.Message)",
-        '  }',
-        '} -ArgumentList $tmpSrc,$tmpOut,$ext',
-        '# Monitor: detect EP DRM dialog (FED5 title) while COM job runs',
-        '$epDetected = $false; $comWait = 0',
-        'while ($comJob.State -eq "Running" -and $comWait -lt 150) {',
-        '  Start-Sleep 2; $comWait += 2',
-        '  $epW = Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" }',
-        '  if ($epW) { $epDetected = $true; break }',
-        '}',
-        'if ($epDetected) {',
-        '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
-        "  Write-Output 'EP_LOGIN_REQUIRED'; return",
-        '}',
-        'if ($comJob.State -ne "Completed") {',
-        '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
-        "  Write-Output 'COM_TIMEOUT'; return",
-        '}',
-        '$comOut = (Receive-Job $comJob 2>&1 | Out-String).Trim(); Remove-Job $comJob',
-        'if ($comOut -notmatch "COM_DONE") { Remove-Item $tmpSrc -EA 0; Write-Output ("COM_FAIL:" + $comOut); return }',
-        'Remove-Item $tmpSrc -ErrorAction SilentlyContinue',
-        '$jPath = $tmpOut; $pp = 7655',
-        'Start-Job -ScriptBlock {',
-        '  param($fp, $pp)',
-        '  try {',
-        "    $lis = New-Object System.Net.HttpListener",
-        "    $lis.Prefixes.Add('http://localhost:' + $pp + '/')",
-        '    $lis.Start()',
-        '    $ctx = $lis.GetContext()',
-        "    $ctx.Response.Headers.Add('Access-Control-Allow-Origin','*')",
-        "    $ctx.Response.Headers.Add('Access-Control-Allow-Methods','GET,OPTIONS')",
-        "    if ($ctx.Request.HttpMethod -eq 'OPTIONS') {",
-        '      $ctx.Response.StatusCode = 200; $ctx.Response.Close()',
-        '      $ctx = $lis.GetContext()',
-        "      $ctx.Response.Headers.Add('Access-Control-Allow-Origin','*')",
-        "      $ctx.Response.Headers.Add('Access-Control-Allow-Methods','GET,OPTIONS')",
-        '    }',
-        '    $bytes = [Text.Encoding]::UTF8.GetBytes([Convert]::ToBase64String([IO.File]::ReadAllBytes($fp)))',
-        "    $ctx.Response.ContentType = 'text/plain; charset=utf-8'",
-        '    $ctx.Response.ContentLength64 = $bytes.LongLength',
-        '    $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)',
-        '    $ctx.Response.Close(); $lis.Stop()',
-        '    Remove-Item $fp -ErrorAction SilentlyContinue',
-        '  } catch {}',
-        "} -ArgumentList $jPath,$pp | Out-Null",
-        'Start-Sleep 2',
-        "Write-Output ('SERVING:' + $pp)",
-        '}'
-      ];
-      const psContent = psLines.join('\r\n');
-
-      // Cleanup stale pending drm commands (browser JS to Supabase - always works)
-      try {
-        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
-        await fetch(SUPA_URL + '/rest/v1/commands?id=like.drm-%25&status=eq.pending', { method: 'DELETE', headers: _hd });
-      } catch(_e) {}
-
-      // Insert DRM command
-      const r1 = await fetch(SUPA_URL + '/rest/v1/commands', {
-        method: 'POST',
-        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ id: cmdId, action: 'run_ps', target: 'bridge', content: psContent, status: 'pending', created_at: new Date().toISOString() })
-      });
-      if (!r1.ok) return { ok: false, err: '명령 삽입 실패: ' + r1.status };
-
-      toast('⏳ DRM 변환 중... (회사 PC PowerShell 실행)');
-
-      // Poll for result (150s timeout)
-      const deadline = Date.now() + 150000;
-      let resultStr = '';
-      while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 3000));
-        try {
-          const rp = await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId) + '&select=status,result', {
-            headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
-          });
-          const rows = await rp.json();
-          if (rows.length > 0) {
-            const s = rows[0].status;
-            if (s === 'complete' || s === 'completed' || s === 'error') {
-              resultStr = rows[0].result || '';
+sultStr = rows[0].result || '';
               break;
             }
           }
@@ -1165,7 +1644,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
       }
       if (resultStr.startsWith('SERVING:')) {
         const srvPort = resultStr.replace('SERVING:', '').trim();
-        toast('📥 DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
+        toast('?? DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
 
         let b64 = null;
         for (let attempt = 0; attempt < 12; attempt++) {
@@ -1241,11 +1720,7 @@ async function sendMessage() {
     /* STEP 1: Upload files as base64 chunks via REST API */
     const fileRefs = [];
     const filesToUpload = savedAttachments.filter(a => a.type === 'file');
-    const CHUNK_SIZE = 10000; /* ~200KB per chunk (base64) */
-
-    for (let i = 0; i < filesToUpload.length; i++) {
-      const att = filesToUpload[i];
-      toast('파일 업로드 중...(' + (i+1) + '/' + filesToUpload.length + ')');
+    const CHUNK_SIZE = 10000;');
 
       try {
         /* Read file as base64 (use cached data URL if available) */
@@ -1253,176 +1728,204 @@ async function sendMessage() {
           ? att.data.split(',')[1]
           : await new Promise((resolve, reject) => {
             const reader = new FileReader();
-            reader.onload = () => resolve(reader.result.split(',')[1] || reader.result);
+            reader.onload = e => resolve(e.target.result.split(',')[1]);
             reader.onerror = reject;
             reader.readAsDataURL(att.file);
           });
+        if (!base64) return { ok: false, err: '파일 읽기 실패' };
 
-        /* Split into chunks */
-        const totalChunks = Math.ceil(base64.length / CHUNK_SIZE);
+        /* Upload chunks to Supabase */
+        const chunkSize = CHUNK_SIZE;
+        const totalChunks = Math.ceil(base64.length / chunkSize);
+        const headers = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
 
-        for (let ci = 0; ci < totalChunks; ci++) {
-          const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
-          const _cr = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
-              method: 'POST',
-              headers: {
-                'apikey': SUPA_KEY,
-                'Authorization': 'Bearer ' + SUPA_KEY,
-                'Content-Type': 'application/json',
-                'Prefer': 'return=minimal'
-              },
-              body: JSON.stringify({
-                message_id: msgId,
-                file_name: att.name,
-                chunk_index: ci,
-                total_chunks: totalChunks,
-                data: chunkData,
-                file_size: att.size
-              })
-            });
-            if (!_cr.ok) {
-              const _et = await _cr.text();
-              throw new Error('HTTP ' + _cr.status + ': ' + _et.slice(0, 200));
-            }
+        for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+          const chunkData = base64.slice(chunkIndex * chunkSize, (chunkIndex + 1) * chunkSize);
+          const body = JSON.stringify({
+            chat_id: chatId,
+            message_id: msgId,
+            file_name: att.name,
+            chunk_index: chunkIndex,
+            total_chunks: totalChunks,
+            data: chunkData
+          });
+          const resp = await fetch(SUPA_URL + '/rest/v1/file_chunks', { method: 'POST', headers, body });
+          if (!resp.ok) {
+            return { ok: false, err: '청크 ' + chunkIndex + ' 업로드 실패 (' + resp.status + ')' };
+          }
+          updateProgress(chunkIndex + 1, totalChunks);
         }
-
-        fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
-        toast('업로드 완료: ' + att.name + ' (' + totalChunks + '청크)');
-      } catch (e) {
-        toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
-        setWaiting(false);
-        return;
+        fileRefs.push({ name: att.name, size: att.size || base64.length / 1.33 });
+      } catch(err) {
+        return { ok: false, err: '파일 업로드 중 오류: ' + err.message };
       }
     }
 
-        /* STEP 1.5: DRM 선처리 — 회사 PC에서 Office COM으로 DRM 해제 후 relay가 일반 파일 다운로드 */
-    const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
-    for (const att of filesToUpload) {
-      const attExt = '.' + att.name.split('.').pop().toLowerCase();
-      if (drmExts.includes(attExt)) {
-        toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
-        const drmResult = await triggerDrmDeprotect(msgId, att.name);
-        if (!drmResult.ok) {
-          toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
-          setWaiting(false);
-          return;
-        }
-        toast('✅ DRM 변환 완료: ' + att.name);
-      }
-    }
-
-/* STEP 2: Insert message with file metadata */
-    const messageData = {
-      id: msgId,
+    /* STEP 2: Send message (user + files) to relay, get response from Claude */
+    const payload = {
+      message: text,
+      images: savedAttachments.filter(a => a.type === 'image').map(a => ({ name: a.name, data: a.data })),
+      files: fileRefs,
       chat_id: chatId,
-      role: 'user',
-      content: (text || '파일 분석 요청') + extractedContent,
-      status: 'pending',
-      files: fileRefs.length > 0 ? fileRefs : null
+      message_id: msgId
     };
 
-    await sp('messages', messageData);
-    startPolling(2000);
-  } catch(e) {
-    toast('전송 실패: ' + e.message);
-    setWaiting(false);
-  }
-}
+    const sendResp = await fetch(RELAY_URL + '/sendmsg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
 
-async function handleFileInput(input) {
-  for (const f of input.files) {
-    const ext = f.name.split('.').pop().toLowerCase();
-    if (f.type.startsWith('image/') || ['png','jpg','jpeg','gif','webp','bmp'].includes(ext)) {
-      attachments.push({
-        type:'image',
-        name:f.name,
-        data: await readDataURL(f),
-        size: f.size,
-        file: f
-      });
-    } else if (['pptx','ppt'].includes(ext)) {
-      const extracted = await extractPptxText(f);
-      if (extracted) {
-        attachments.push({ type:'text-extracted', name:f.name, extractedText:extracted, size: f.size });
-        toast('✅ ' + f.name + ' 텍스트 완료 (브라우저)');
-      } else {
-        try {
-          attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
-          toast('⚠️ DRM: ' + f.name + ' → Bridge로 예정');
-        } catch(e2) { toast('읽기 실패: ' + f.name); }
-      }
-    } else {
-      try {
-        attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
-      } catch {
-        toast('읽기 실패: ' + f.name);
-      }    }
-  }
-  input.value = ''; renderAttachRow();
-}
-
-    function readDataURL(f) { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsDataURL(f); }); }
-function readText(f)    { return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=e=>res(e.target.result); r.onerror=rej; r.readAsText(f,'UTF-8'); }); }
-
-document.addEventListener('paste', async e => {
-  const items = e.clipboardData?.items;
-  if (!items) return;
-  for (const item of items) {
-    if (item.type.startsWith('image/')) {
-      e.preventDefault();
-      const data = await readDataURL(item.getAsFile());
-      attachments.push({ type:'image', name:'paste-'+Date.now()+'.png', data });
-      renderAttachRow(); break;
+    if (!sendResp.ok) {
+      appendMsg({ id: msgId, role: 'system', content: 'ERROR: ' + sendResp.status });
+      setWaiting(false);
+      return;
     }
+
+    const result = await sendResp.json();
+    if (result.ok) {
+      appendMsg({ id: msgId + '-ai', role: 'assistant', content: result.response });
+      upsertHistory(chatId, title);
+    } else {
+      appendMsg({ id: msgId + '-ai', role: 'system', content: 'ERROR: ' + result.error });
+    }
+  } catch(err) {
+    console.error('sendMessage error:', err);
+    appendMsg({ id: Date.now().toString(), role: 'system', content: 'Error: ' + err.message });
+  } finally {
+    setWaiting(false);
+    scrollBot();
+  }
+}
+
+function renderAttachRow() {
+  const row = document.getElementById('attachRow');
+  let html = '';
+  for (let i = 0; i < attachments.length; i++) {
+    const a = attachments[i];
+    html += a.type === 'image'
+      ? `<div class="aprev"><img src="${a.data}" alt=""><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      : a.type === 'text-extracted'
+      ? `<div class="fchip"><span class="fn" title="${a.name}">${a.name}</span><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      : `<div class="fchip"><span class="fn" title="${a.name}">${a.name}</span><span style="font-size:10px;color:var(--text3)">${(a.size/1024).toFixed(1)}KB</span><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`;
+  }
+  row.innerHTML = html;
+}
+
+function rmAttach(idx) {
+  attachments.splice(idx, 1);
+  renderAttachRow();
+}
+
+// Attachment handlers
+document.getElementById('uploadBtn').addEventListener('click', () => {
+  document.getElementById('fileInput').click();
+});
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  for (const file of e.target.files) {
+    const isImage = file.type.startsWith('image/');
+    if (isImage) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        attachments.push({
+          type: 'image',
+          name: file.name,
+          file: file,
+          data: ev.target.result,
+          size: file.size
+        });
+        renderAttachRow();
+      };
+      reader.readAsDataURL(file);
+    } else {
+      attachments.push({
+        type: 'file',
+        name: file.name,
+        file: file,
+        size: file.size
+      });
+      renderAttachRow();
+      // Also try to extract text from PDF or Office files
+      extractTextFromFile(file);
+    }
+  }
+  e.target.value = '';
+});
+
+async function extractTextFromFile(file) {
+  // Try to load jszip for Office file text extraction
+  if (file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+      file.type === 'application/vnd.openxmlformats-officedocument.presentationml.presentation') {
+    try {
+      const JSZip = window.JSZip || (typeof require !== 'undefined' ? require('jszip') : null);
+      if (!JSZip) {
+        console.log('JSZip not available for Office extraction');
+        return;
+      }
+      const zip = new JSZip();
+      const data = await file.arrayBuffer();
+      await zip.loadAsync(data);
+
+      let textContent = '';
+      // For .docx (Word)
+      if (zip.file('word/document.xml')) {
+        const docXml = await zip.file('word/document.xml').async('text');
+        const textNodes = docXml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+        textContent = textNodes.map(n => n.replace(/<[^>]+>/g, '')).join('\n');
+      }
+      // For .xlsx (Excel) or .pptx (PowerPoint) - simpler extraction
+      else if (zip.file('xl/workbook.xml') || zip.file('ppt/presentation.xml')) {
+        // For Excel/PowerPoint, we'd need more complex parsing
+        // For now, just note that extraction is needed
+        textContent = '[Office 파일 내용 추출 필요]';
+      }
+
+      if (textContent) {
+        attachments.push({
+          type: 'text-extracted',
+          name: file.name + ' (텍스트)',
+          extractedText: textContent.slice(0, 5000)
+        });
+        renderAttachRow();
+      }
+    } catch(err) {
+      console.error('Text extraction error:', err);
+    }
+  }
+}
+
+// On image click, show modal
+window.viewImage = function(imgSrc) {
+  const modal = document.getElementById('imgModal');
+  const img = document.getElementById('modalImg');
+  img.src = imgSrc;
+  modal.classList.add('active');
+};
+
+window.closeImgModal = function() {
+  const modal = document.getElementById('imgModal');
+  modal.classList.remove('active');
+};
+
+// Prevent accidental navigation
+window.addEventListener('beforeunload', () => {
+  if (document.querySelector('textarea#msgInput')?.value.trim()) {
+    return 'Unsent message will be lost';
   }
 });
 
-function renderAttachRow() {
-  document.getElementById('attachRow').innerHTML = attachments.map((a,i) =>
-    a.type==='image'
-      ? `<div class="aprev"><img src="${a.data}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
-      : a.type==='text-extracted'
-      ? `<div class="aprev"><div class="fchip" style="background:#16a34a;color:#fff">✅<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
-      : `<div class="aprev"><div class="fchip">📄<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
-  ).join('');
-}
-function rmAttach(i) { attachments.splice(i,1); renderAttachRow(); }
+let resizeTimer;
+window.addEventListener('resize', function() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(fixLayout, 150);
+});})();
+</script>
+</body>
+</html>
 
-async function requestScreenshot() {
-  if (!bridgeOnline) { toast('브릿지가 오프라인입니다'); return; }
-  toast('스크린샷 캡처 중...');
-  const res = await bridgeExec('run_ps', `
-    Add-Type -AssemblyName System.Windows.Forms
-    $path = "$env:TEMP\\cw_ss_${Date.now()}.png"
-    $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-    $bmp = New-Object System.Drawing.Bitmap($screen.Width, $screen.Height)
-    $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-    $bmp.Save($path); $g.Dispose(); $bmp.Dispose()
-    [Convert]::ToBase64String([IO.File]::ReadAllBytes($path))
-  `, 15000);
-  if (res.ok && res.data.length > 100) {
-    attachments.push({ type:'image', name:'screenshot-'+Date.now()+'.png', data:'data:image/png;base64,'+res.data.trim() });
-    renderAttachRow(); toast('📸 스크린샷 첨부됨');
-  } else { toast('❌ 스크린샷 실패: ' + res.data.slice(0,80)); }
-}
-
-/* ════════════════════════════════════════
-   MESSAGE RENDERING
-════════════════════════════════════════ */
-/* === File display helpers === */
-function stripFileData(text) {
-  if (!text) return '';
-  let t = text;
-  t = t.replace(/\n*--- 첨부 파일 내용 ---[\s\S]*$/m, '');
-  t = t.replace(/\n*\[ATTACHED_FILE:[\s\S]*?\[\/ATTACHED_FILE\]\n*/g, '');
-  t = t.replace(/\n*\[첨부파일 크기 초과:[^\]]*\]/g, '');
-  return t.trim() || '파일 분석 요청';
-}
-
-function extractFileNames(text) {
-  const names = [];
-  const r1 = text.matchAll(/\[ATTACHED_FILE:([^\]]+)\]/g);
+ Claude is active in this tab group\]]+)\]/g);
   for (const m of r1) names.push(m[1]);
   return { names };
 }
@@ -1435,9 +1938,8 @@ function showThinkingStatus(msg) {
     el.className = 'thinking-indicator';
     document.getElementById('msgContainer').appendChild(el);
   }
-  el.innerHTML = '<div class="thinking-dots"><span></span><span></span><span></span></div> ' + esc(msg);
-  el.style.display = 'flex';
-  scrollBot();
+  el.textContent = msg;
+  el.style.display = 'block';
 }
 
 function hideThinkingStatus() {
@@ -1445,332 +1947,415 @@ function hideThinkingStatus() {
   if (el) el.style.display = 'none';
 }
 
-function appendMsg(msg) {
-  const container = document.getElementById('msgContainer');
-  let grp = document.getElementById('m-' + msg.id);
-  if (grp) {
-    const mc = grp.querySelector('.mc');
-    if (mc) mc.textContent = parseContent(msg.content || '');
-    updateProgress(msg); return;
+let lastCommandId = null;
+let lastCmdStatus = null;
+
+async function triggerDrmDeprotect(msgId, fileName) {
+  // Send DRM deprotection command via relay
+  const cmdId = 'cmd-' + Date.now();
+  lastCommandId = cmdId;
+
+  try {
+    const resp = await fetch(RELAY_URL + '/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command_id: cmdId, action: 'drm_deprotect', file_name: fileName })
+    });
+
+    if (!resp.ok) return { ok: false, err: 'Relay error: ' + resp.status };
+
+    // Poll for result
+    showThinkingStatus('DRM 해제 진행 중...');
+    for (let i = 0; i < 100; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const statusResp = await fetch(RELAY_URL + '/command_status?id=' + encodeURIComponent(cmdId));
+        if (statusResp.ok) {
+          const status = await statusResp.json();
+          lastCmdStatus = status;
+          if (status.completed) {
+            hideThinkingStatus();
+            const resultStr = status.result || '';
+            if (resultStr.includes('success')) {
+              return { ok: true, result: resultStr };
+            } else {
+              return { ok: false, err: resultStr.slice(0, 300) };
+            }
+          }
+          if (status.progress_message) {
+            showThinkingStatus(status.progress_message);
+          }
+        }
+      } catch(_e) {}
+    }
+    hideThinkingStatus();
+    return { ok: false, err: 'DRM 해제 타임아웃 (2분 30초) - 응답 없음' };
+  } catch(err) {
+    hideThinkingStatus();
+    return { ok: false, err: 'DRM 명령 오류: ' + err.message };
+  }
+}
+
+async function showEPLoginModal() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('epLoginModal');
+    if (!modal) { resolve(false); return; }
+    const okBtn = modal.querySelector('.ep-ok-btn');
+    const cancelBtn = modal.querySelector('.ep-cancel-btn');
+    const onOk = () => { modal.style.display = 'none'; okBtn.removeEventListener('click', onOk); cancelBtn.removeEventListener('click', onCancel); resolve(true); };
+    const onCancel = () => { modal.style.display = 'none'; okBtn.removeEventListener('click', onOk); cancelBtn.removeEventListener('click', onCancel); resolve(false); };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.style.display = 'block';
+  });
+}
+
+async function processCommand(msgId, cmd) {
+  if (cmd.startsWith('!drm')) {
+    const fileName = cmd.slice(5).trim();
+    const result = await triggerDrmDeprotect(msgId, fileName);
+    return result;
   }
 
-  const time = msg.created_at
-    ? new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' })
-    : '';
-
-  grp = document.createElement('div');
-  grp.id   = 'm-' + msg.id;
-  grp.className = 'msg-group';
-
-  if (msg.role === 'system') {
-    grp.innerHTML = `<div class="msg-row sys-row"><div class="msg-bubble">${esc(msg.content||'')}</div></div>`;
-  } else {
-    const isUser = msg.role === 'user';
-    const rowCls = isUser ? 'user-row' : 'ai-row';
-    const avCls  = isUser ? 'user-av'  : 'ai-av';
-    const avTxt  = isUser ? '나'        : 'C';
-
-    let att = '';
-
-    /* Render legacy attachments (images) */
-    (msg.attachments || []).forEach(a => {
-      if (a.type==='image') att += `<img class="msg-img" src="${a.data}" onclick="lightbox('${a.data}')">`;
-      else                  att += `<div class="msg-file-chip" data-mid="${msg.id}" data-fn="${esc(a.name)}" onclick="downloadAttachment(this.dataset.mid,this.dataset.fn)">📄 ${esc(a.name)} ⬇️</div>`;
+  try {
+    const cmdResp = await fetch(RELAY_URL + '/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: msgId, command: cmd })
     });
 
-    /* Render files from Storage (new msg.files JSONB column) */
-    (msg.files || []).forEach(f => {
-      if (isUser) {
-        att += `<div class="msg-file-chip">📄 ${esc(f.name)}</div>`;
-      } else {
-        att += `<a class="file-download-btn" href="${f.url}" target="_blank" download>
-          <span class="dl-icon">⬇️</span>
-          <span class="dl-text">다운로드</span>
-          <span class="dl-name">${esc(f.name)}</span>
-        </a>`;
+    if (!cmdResp.ok) return { ok: false, err: 'Relay error: ' + cmdResp.status };
+
+    const result = await cmdResp.json();
+    const resultStr = result.result || '';
+    if (!resultStr) return { ok: false, err: 'No result' };
+
+    // Parse result for multi-step commands (like using COM to convert DRM)
+    if (resultStr.includes('WAITING:COM')) {
+      showThinkingStatus('COM을 통한 변환 진행 중...');
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusResp = await fetch(RELAY_URL + '/command_status?id=' + encodeURIComponent(result.command_id || ''));
+        if (statusResp.ok) {
+          const status = await statusResp.json();
+          if (status.completed) {
+            hideThinkingStatus();
+            const rows = parseOutputRows(status.result || '');
+            for (const row of rows) {
+              if (row.type === 'text') appendMsg({ id: msgId, role: 'system', content: row.content });
+              else if (row.type === 'image') appendMsg({ id: msgId, role: 'system', content: '[이미지]', image: row.content });
+              else if (row.type === 'table') {
+                const tableHtml = row.content;
+                appendMsg({ id: msgId, role: 'system', content: tableHtml, isHtml: true });
+              }
+            }
+            return { ok: true };
+          }
+          if (status.progress) showThinkingStatus('COM 진행 중... (' + status.progress + '%)');
+        }
       }
-    });
+      hideThinkingStatus();
+      return { ok: false, err: 'COM 명령 타임아웃 (2분 30초)' };
+    }
 
-    const content = parseContent(msg.content || '');
-    grp.innerHTML = `
-      <div class="msg-row ${rowCls}">
-        <div class="msg-av ${avCls}">${avTxt}</div>
-        <div class="msg-bubble">${att}<div class="mc">${esc(content)}</div></div>
-      </div>
-      ${time ? `<div class="msg-time">${time}</div>` : ''}
-    `;
-    updateProgress(msg);
-    if (!isUser) findFilesInText(content);
+    if (resultStr.startsWith('ERR:')) {
+      return { ok: false, err: resultStr.slice(5, 300) };
+    }
+
+    // Standard result parsing
+    const rows = parseOutputRows(resultStr);
+    let textRows = rows.filter(r => r.type === 'text');
+    if (!textRows.length && rows.length) {
+      textRows = [{ type: 'text', content: resultStr.slice(0, 1000) }];
+    }
+
+    // Return first text row result, or combine rows
+    if (textRows.length) {
+      let resultSummary = '';
+      if (result.command && result.command.includes('encode')) {
+        resultSummary = rows[0].result || '';
+        break;
+      }
+    }
+  } catch(_e) {}
   }
-  container.appendChild(grp);
-}
 
-function parseContent(raw) {
-  if (!raw) return '';
-  const t = raw.trim();
-  if (t.startsWith('{')) {
-    try {
-      const p = JSON.parse(t);
-      if (p.text)    return p.text;
-      if (p.content) return p.content;
-      if (p.error)   return '⚠️ ' + p.error;
-    } catch(e) {}
-  }
-  return raw;
-}
-
-/* ════════════════════════════════════════
-   RIGHT PANEL — PROGRESS
-════════════════════════════════════════ */
-function resetProgress() {
-  document.getElementById('rpBadge').textContent = '—';
-  document.getElementById('rpStepList').innerHTML = '<div class="step-empty">작업이 시작되면 단계별 진행이 표시됩니다.</div>';
-  document.getElementById('rpFileSec').style.display = 'none';
-  document.getElementById('rpFileList').innerHTML = '';
-}
-
-function updateProgress(msg) {
-  if (!msg.content) return;
-  let p = null;
-  try { const t=(msg.content||'').trim(); if(t.startsWith('{')) p=JSON.parse(t); } catch(e){}
-  if (!p) return;
-
-  if (p.steps && p.steps.length) renderSteps(p.steps, p.step);
-  if (p.tools) p.tools.forEach(t => { if(t.target&&t.target.includes('\\')) addFile(t.target); });
-}
-
-function renderSteps(steps, active) {
-  document.getElementById('rpBadge').textContent = steps.length + '단계';
-  const ICONS = {'✅':'✅','❌':'❌','🧠':'🧠','⚡':'⚡','🔧':'🔧','🔄':'🔄','📝':'📝','💬':'💬','🔌':'🔌','⚠️':'⚠️'};
-  document.getElementById('rpStepList').innerHTML = steps.slice(-18).map(s => {
-    const firstChar = [...s][0];
-    const icon = ICONS[firstChar] || '▸';
-    const text = s.replace(/^[\u2705\u274C\u{1F9E0}\u26A1\u{1F527}\u{1F504}\u{1F4DD}\u{1F4AC}\u{1F50C}\u26A0]\s*/u,'').replace(/^▸\s*/,'');
-    const isActive = s === active;
-    return `<div class="step-item${isActive?' active':''}">
-      <span class="step-icon">${icon}</span>
-      <span class="step-text">${esc(text||s)}</span>
-    </div>`;
-  }).join('');
-}
-
-function findFilesInText(text) {
-  const rx = /([A-Z]:\\[^\s\n"'<>]+\.[a-zA-Z0-9]{2,6})/g;
-  let m; while((m=rx.exec(text))!==null) addFile(m[1]);
-}
-
-function addFile(path) {
-  const sec  = document.getElementById('rpFileSec');
-  const list = document.getElementById('rpFileList');
-  sec.style.display = '';
-  const name = path.split('\\').pop();
-  if ([...list.querySelectorAll('.rp-file-name')].some(el=>el.textContent===name)) return;
-  const ext  = name.split('.').pop().toLowerCase();
-  const ico  = {'docx':'📝','doc':'📝','xlsx':'📊','xls':'📊','pptx':'📑','ppt':'📑',
-                'pdf':'📕','png':'🖼️','jpg':'🖼️','jpeg':'🖼️','js':'⚙️','ts':'⚙️',
-                'bat':'⚡','ps1':'⚡','hwp':'📋','hwpx':'📋'}[ext] || '📄';
-  const d = document.createElement('div');
-  d.className = 'rp-file';
-  d.innerHTML = `<span class="rp-file-ico">${ico}</span><span class="rp-file-name" title="${esc(path)}">${esc(name)}</span><span class="rp-file-badge">생성됨</span>`;
-  list.appendChild(d);
-}
-
-/* ════════════════════════════════════════
-   POLLING & REALTIME
-════════════════════════════════════════ */
-function startPolling(iv=5000){ stopPolling(); pollMessages(); pollTimer=setInterval(pollMessages,iv); }
-function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null; } }
-
-async function pollMessages() {
-  if (!chatId) return;
+  // Cleanup command row (browser JS)
   try {
-    const msgs = await sgRaw('messages',
-      `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at,attachments,files`);
-    let hasNew = false;
-    msgs.forEach(m => {
-      const ex = document.getElementById('m-'+m.id);
-      if (ex) {
-        const mc = ex.querySelector('.mc');
-        const parsed = parseContent(m.content||'');
-        if (mc && mc.textContent !== parsed) { mc.textContent = parsed; scrollBot(); }
-        updateProgress(m);
-      } else {
-        appendMsg(m);
-        if (m.role==='assistant') hasNew = true;
-      }
+    await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId), {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
     });
-    if (hasNew) {
-      scrollBot();
-      const last = [...msgs].reverse().find(m=>m.role==='assistant');
-      if (last && (last.status==='completed'||last.status==='error')) {
-        setWaiting(false); startPolling(5000);
-      }
-    }
-  } catch(e) { console.error('poll:', e); }
+  } catch(_e) {}
+
+  if (!resultStr) return { ok: false, err: 'DRM 변환 타임아웃 (150초)' };
+
+  return { ok: true, result: resultStr };
 }
 
-function setupRealtime() {
-  if (rtChannel) sb.removeChannel(rtChannel);
-  if (!chatId) return;
-  rtChannel = sb.channel('rt-'+chatId)
-    .on('postgres_changes',
-      { event:'*', schema:'public', table:'messages', filter:`chat_id=eq.${chatId}` },
-      payload => {
-        const m = payload.new; if (!m) return;
-        const ex = document.getElementById('m-'+m.id);
-        const parsed = parseContent(m.content||'');
-        if (ex) { const mc=ex.querySelector('.mc'); if(mc) mc.textContent=parsed; updateProgress(m); }
-        else appendMsg(m);
-        scrollBot();
-        if (m.role==='assistant' && (m.status==='completed'||m.status==='error')) setWaiting(false);
-      })
-    .subscribe();
+async function showDrmHelpModal() {
+  const modal = document.getElementById('drmHelpModal');
+  if (modal) modal.style.display = 'block';
 }
 
-/* ════════════════════════════════════════
-   STATUS CHECKS
-════════════════════════════════════════ */
-async function checkRelay() {
-  try {
-    const rows = await sgRaw('commands', 'id=eq.relay-heartbeat&select=result,content');
-    if (rows.length && rows[0].result) {
-      const ago = Math.floor((Date.now()-new Date(rows[0].result).getTime())/1000);
-      if (ago < 90) {
-        relayOnline = true;
-        const busy = rows[0].content === 'busy';
-        setStatus('Relay','on', busy?'처리 중':'온라인');
-        return;
-      }
-    }
-    relayOnline = false; setStatus('Relay','off','시간 초과');
-  } catch { relayOnline=false; setStatus('Relay','off','연결 오류'); }
-}
-async function checkBridge() {
-  try {
-    const rows = await sgRaw('commands', 'id=eq.bridge-heartbeat&select=result');
-    if (rows.length && rows[0].result) {
-      const ago = Math.floor((Date.now()-new Date(rows[0].result).getTime())/1000);
-      if (ago < 120) { bridgeOnline=true; setStatus('Bridge','on','온라인'); return; }
-    }
-    bridgeOnline=false; setStatus('Bridge','wait','대기 중');
-  } catch { bridgeOnline=false; setStatus('Bridge','off','연결 오류'); }
+function closeDrmHelpModal() {
+  const modal = document.getElementById('drmHelpModal');
+  if (modal) modal.style.display = 'none';
 }
 
-function setStatus(which, state, label) {
-  // Sidebar dots
-  const dot = document.getElementById('dot'+which);
-  const lbl = document.getElementById('lbl'+which);
-  if (dot) dot.className = 'dot '+state;
-  if (lbl) lbl.textContent = which==='Relay' ? '릴레이 ('+label+')' : '브릿지 ('+label+')';
-  // Right panel connector dots
-  const cd  = document.getElementById('connDot'+which);
-  const cl  = document.getElementById('connLbl'+which);
-  if (cd)   cd.className = 'conn-dot '+state;
-  if (cl)   cl.textContent = label;
-}
-
-/* ════════════════════════════════════════
-   UTILITIES
-════════════════════════════════════════ */
-function scrollBot() {
-  const w = document.getElementById('messagesWrap');
-  w.scrollTop = w.scrollHeight;
-}
-function setWaiting(on) {
-  waiting = on;
-  document.getElementById('typingWrap').classList.toggle('show', on);
-  document.getElementById('sendBtn').disabled = on;
-}
-function lightbox(src) {
-  document.getElementById('lightboxImg').src = src;
-  document.getElementById('lightbox').classList.add('show');
-}
-function setupInput() {
-  const inp = document.getElementById('msgInput');
-  inp.addEventListener('keydown', e => {
-      if (e.key==='Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        sendMessage();
-      }
-    });
-    inp.addEventListener('input', autoResize);
-}
+// Layout utilities
 function autoResize() {
   const inp = document.getElementById('msgInput');
-  inp.style.height = 'auto';
-  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
-}
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-function toast(msg, dur=3000) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), dur);
-}
-
-async function downloadAttachment(msgId, fileName) {
-  toast('📥 다운로드 중...');
-  try {
-    const chunks = await sgRaw('file_chunks',
-      `message_id=eq.${msgId}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc`);
-    if (!chunks.length) { toast('❌ 파일 데이터 없음'); return; }
-    const b64 = chunks.map(c => c.data).join('');
-    const bin = atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    const blob = new Blob([arr]);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = fileName;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('✅ 다운로드: ' + fileName);
-  } catch(e) { toast('❌ 실패: ' + e.message); }
-}
-
-/* ════════════════════════════════════════
-   INIT
-════════════════════════════════════════ */
-document.addEventListener('DOMContentLoaded', async () => {
-  setupInput();
-  loadHistory();
-  createNewChat();
-  await Promise.all([checkRelay(), checkBridge()]);
-  setInterval(checkRelay,  15000);
-  setInterval(checkBridge, 30000);
-});
-
-/* Chrome extension overlay gap fix */
-(function fixExtensionGap() {
-  function fix() {
-    document.querySelectorAll('[id*="claude-agent"],[id*="claude-glow"]').forEach(function(el) {
-      el.style.cssText = 'display:none!important;width:0!important;height:0!important;position:fixed!important;';
-    });
-    var last = document.body.lastElementChild;
-    if (last && last.tagName !== 'SCRIPT' && !last.classList.contains('toast') &&
-        !last.classList.contains('lightbox') && !last.classList.contains('right-panel')) {
-      last.style.cssText = 'display:none!important;width:0!important;height:0!important;position:fixed!important;';
-    }
-    var rp = document.querySelector('.right-panel');
-    var main = document.querySelector('.chat-main');
-    var sb = document.querySelector('.sidebar');
-    if (rp && main && sb) {
-      var gap = window.innerWidth - rp.getBoundingClientRect().right;
-      if (gap > 20) {
-        var w = window.innerWidth - sb.offsetWidth - rp.offsetWidth;
-        main.style.cssText = 'flex: 0 0 ' + w + 'px !important;';
-      } else { main.style.cssText = ''; }
-    }
+  if (inp) {
+    inp.style.height = 'auto';
+    inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
   }
-  fix();
-  window.addEventListener('resize', fix);
-  new MutationObserver(fix).observe(document.body, { childList: true });
-  setInterval(fix, 3000);
+}
+
+function fixLayout() {
+  const container = document.getElementById('pageContainer');
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  if (rect.height < 300 || rect.width < 300) {
+    setTimeout(fixLayout, 100);
+  }
+
+  /* Re-apply only on window resize */
+  var resizeTimer;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fixLayout, 150);
+  });
 })();
 </script>
 </body>
 </html>
 
- Claude is active in this tab group  
+ Claude is active in this tab groupfunction parseOutputRows(result) {
+  const rows = [];
+  const r1 = result.match(/\[TABLE:([^\]]+)\]/g) || [];
+  for (const m of r1) {
+    rows.push({ type: 'table', content: m.slice(7, -1) });
+  }
+  const r2 = result.match(/\[IMAGE:([^\]]+)\]/g) || [];
+  for (const m of r2) {
+    rows.push({ type: 'image', content: m.slice(7, -1) });
+  }
+  const r3 = result.replace(/\[IMAGE:[^\]]+\]/g, '').replace(/\[TABLE:[^\]]+\]/g, '').split('\n').filter(l => l.trim());
+  for (const line of r3) {
+    rows.push({ type: 'text', content: line });
+  }
+  return rows;
+}
+
+function parseSearchQueryNames(query) {
+  const r1 = query.match(/name:([^ ]+)/g) || [];
+  const names = [];
+  for (const m of r1) {
+    const match = m.match(/name:([^ \)\]]+)/);
+    if (match) names.push(match[1]);
+  }
+  const r2 = query.match(/\(([^\)]+)\)/g) || [];
+  for (const m of r2) {
+    const match = m.match(/([^\(\)\]]+)/);
+    if (match && !match[1].includes(':')) names.push(match[1]);
+  }
+  const r3 = query.match(/\[[^\]]+\]/g) || [];
+  for (const m of r3) {
+    const match = m.match(/\[([^\[\]]+)\]/g);
+    for (const m of r1) names.push(m[1]);
+    return { names };
+  }
+}
+
+function showThinkingStatus(msg) {
+  let el = document.getElementById('thinkingStatus');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'thinkingStatus';
+    el.className = 'thinking-indicator';
+    document.getElementById('msgContainer').appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+
+function hideThinkingStatus() {
+  const el = document.getElementById('thinkingStatus');
+  if (el) el.style.display = 'none';
+}
+
+let lastCommandId = null;
+let lastCmdStatus = null;
+
+async function triggerDrmDeprotect(msgId, fileName) {
+  const cmdId = 'cmd-' + Date.now();
+  lastCommandId = cmdId;
+
+  try {
+    const resp = await fetch(RELAY_URL + '/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command_id: cmdId, action: 'drm_deprotect', file_name: fileName })
+    });
+
+    if (!resp.ok) return { ok: false, err: 'Relay error: ' + resp.status };
+
+    showThinkingStatus('DRM 해제 진행 중...');
+    for (let i = 0; i < 100; i++) {
+      await new Promise(r => setTimeout(r, 1500));
+      try {
+        const statusResp = await fetch(RELAY_URL + '/command_status?id=' + encodeURIComponent(cmdId));
+        if (statusResp.ok) {
+          const status = await statusResp.json();
+          lastCmdStatus = status;
+          if (status.completed) {
+            hideThinkingStatus();
+            const resultStr = status.result || '';
+            if (resultStr.includes('success')) {
+              return { ok: true, result: resultStr };
+            } else {
+              return { ok: false, err: resultStr.slice(0, 300) };
+            }
+          }
+          if (status.progress_message) {
+            showThinkingStatus(status.progress_message);
+          }
+        }
+      } catch(_e) {}
+    }
+    hideThinkingStatus();
+    return { ok: false, err: 'DRM 해제 타임아웃 (2분 30초) - 응답 없음' };
+  } catch(err) {
+    hideThinkingStatus();
+    return { ok: false, err: 'DRM 명령 오류: ' + err.message };
+  }
+}
+
+async function showEPLoginModal() {
+  return new Promise((resolve) => {
+    const modal = document.getElementById('epLoginModal');
+    if (!modal) { resolve(false); return; }
+    const okBtn = modal.querySelector('.ep-ok-btn');
+    const cancelBtn = modal.querySelector('.ep-cancel-btn');
+    const onOk = () => { modal.style.display = 'none'; okBtn.removeEventListener('click', onOk); cancelBtn.removeEventListener('click', onCancel); resolve(true); };
+    const onCancel = () => { modal.style.display = 'none'; okBtn.removeEventListener('click', onOk); cancelBtn.removeEventListener('click', onCancel); resolve(false); };
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    modal.style.display = 'block';
+  });
+}
+
+async function processCommand(msgId, cmd) {
+  if (cmd.startsWith('!drm')) {
+    const fileName = cmd.slice(5).trim();
+    const result = await triggerDrmDeprotect(msgId, fileName);
+    return result;
+  }
+
+  try {
+    const cmdResp = await fetch(RELAY_URL + '/command', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message_id: msgId, command: cmd })
+    });
+
+    if (!cmdResp.ok) return { ok: false, err: 'Relay error: ' + cmdResp.status };
+
+    const result = await cmdResp.json();
+    const resultStr = result.result || '';
+    if (!resultStr) return { ok: false, err: 'No result' };
+
+    if (resultStr.includes('WAITING:COM')) {
+      showThinkingStatus('COM을 통한 변환 진행 중...');
+      for (let attempt = 0; attempt < 50; attempt++) {
+        await new Promise(r => setTimeout(r, 3000));
+        const statusResp = await fetch(RELAY_URL + '/command_status?id=' + encodeURIComponent(result.command_id || ''));
+        if (statusResp.ok) {
+          const status = await statusResp.json();
+          if (status.completed) {
+            hideThinkingStatus();
+            const rows = parseOutputRows(status.result || '');
+            for (const row of rows) {
+              if (row.type === 'text') appendMsg({ id: msgId, role: 'system', content: row.content });
+              else if (row.type === 'image') appendMsg({ id: msgId, role: 'system', content: '[이미지]', image: row.content });
+              else if (row.type === 'table') {
+                const tableHtml = row.content;
+                appendMsg({ id: msgId, role: 'system', content: tableHtml, isHtml: true });
+              }
+            }
+            return { ok: true };
+          }
+          if (status.progress) showThinkingStatus('COM 진행 중... (' + status.progress + '%)');
+        }
+      }
+      hideThinkingStatus();
+      return { ok: false, err: 'COM 명령 타임아웃 (2분 30초)' };
+    }
+
+    if (resultStr.startsWith('ERR:')) {
+      return { ok: false, err: resultStr.slice(5, 300) };
+    }
+
+    const rows = parseOutputRows(resultStr);
+    let textRows = rows.filter(r => r.type === 'text');
+    if (!textRows.length && rows.length) {
+      textRows = [{ type: 'text', content: resultStr.slice(0, 1000) }];
+    }
+
+    if (textRows.length) {
+      let resultSummary = '';
+      if (result.command && result.command.includes('encode')) {
+        resultSummary = rows[0].result || '';
+      }
+    }
+  } catch(_e) {}
+  }
+
+  try {
+    await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId), {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
+    });
+  } catch(_e) {}
+
+  if (!resultStr) return { ok: false, err: 'DRM 변환 타임아웃 (150초)' };
+
+  return { ok: true, result: resultStr };
+}
+
+async function showDrmHelpModal() {
+  const modal = document.getElementById('drmHelpModal');
+  if (modal) modal.style.display = 'block';
+}
+
+function closeDrmHelpModal() {
+  const modal = document.getElementById('drmHelpModal');
+  if (modal) modal.style.display = 'none';
+}
+
+function autoResize() {
+  const inp = document.getElementById('msgInput');
+  if (inp) {
+    inp.style.height = 'auto';
+    inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+  }
+}
+
+function fixLayout() {
+  const container = document.getElementById('pageContainer');
+  if (!container) return;
+  const rect = container.getBoundingClientRect();
+  if (rect.height < 300 || rect.width < 300) {
+    setTimeout(fixLayout, 100);
+  }
+
+  var resizeTimer;
+  window.addEventListener('resize', function() {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(fixLayout, 150);
+  });
+})();
+</script>
+</body>
+  </html>
