@@ -43,7 +43,7 @@ function log(...args)  { console.log('[' + ts() + ']', ...args); }
 function warn(...args) { console.warn('[' + ts() + '] WARN', ...args); }
 function err(...args)  { console.error('[' + ts() + '] ERR', ...args); }
 
-// ──── Single-instance lock ──────────────────────────────────────────────────
+// ── Single-instance lock ───────────────────────────────────────────────────────
 function acquireLock() {
   try {
     if (fs.existsSync(LOCK_FILE)) {
@@ -137,7 +137,7 @@ function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + que
 function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
 function dbDelete(table, query) { return supaReq('DELETE', table + '?' + query, null, null); }
 
-// ── Download file from file_chunks ─────────────────────────────────────────────
+// ── Download file from file_chunks ────────────────────────────────────────────
 async function chunksDownload(messageId, fileName) {
   const query = `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc&select=chunk_index,total_chunks,data`;
   const chunks = await dbSelect('file_chunks', query);
@@ -155,7 +155,7 @@ async function chunksDownload(messageId, fileName) {
   return buffer;
 }
 
-// ── Heartbeat ──────────────────────────────────────────────────────────────────
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
 async function sendHeartbeat() {
   const tsVal = new Date().toISOString();
   try {
@@ -172,7 +172,7 @@ async function sendHeartbeat() {
   } catch (e) { /* silent */ }
 }
 
-// ── Check if Bridge (company PC) is online ──────────────────────────────────────
+// ── Check if Bridge (company PC) is online ────────────────────────────────────
 async function checkBridgeOnline() {
   try {
     const rows = await dbSelect('commands', 'id=eq.bridge-heartbeat&select=result');
@@ -184,7 +184,7 @@ async function checkBridgeOnline() {
   } catch(e) { return false; }
 }
 
-// ── Recover stuck messages ──────────────────────────────────────────────────────
+// ── Recover stuck messages ────────────────────────────────────────────────────
 async function recoverStuckMessages() {
   try {
     const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
@@ -198,7 +198,7 @@ async function recoverStuckMessages() {
   }
 }
 
-// ── Ping Handler ───────────────────────────────────────────────────────────────
+// ── Ping Handler ──────────────────────────────────────────────────────────────
 async function handlePings() {
   try {
     const rows = await dbSelect('commands', 'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
@@ -213,7 +213,7 @@ async function handlePings() {
   } catch (e) { /* silent */ }
 }
 
-// ── Run Claude ────────────────────────────────────────────────────────────────────
+// ── Run Claude ────────────────────────────────────────────────────────────────
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
@@ -250,7 +250,7 @@ function runClaude(prompt) {
   });
 }
 
-// ── Build prompt ──────────────────────────────────────────────────────────────────
+// ── Build prompt ──────────────────────────────────────────────────────────────
 async function buildPrompt(chatId, currentContent) {
   try {
     const rows = await dbSelect('messages',
@@ -277,9 +277,9 @@ async function buildPrompt(chatId, currentContent) {
   }
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // File content extraction methods
-// ════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /**
  * Detect if a file buffer is actually a PDF (magic bytes %PDF)
@@ -469,7 +469,7 @@ async function extractViaBridgeCOMPdf(messageId, fileName) {
     '      $wb = $app.Workbooks.Open($tmpF); Start-Sleep 3',
     '      $wb.ExportAsFixedFormat(0, $tmpPdf)',
     '      $wb.Close($false); $app.Quit()',
-    '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {
+    '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
     '      Stop-Process -Name WINWORD -Force -EA 0; Start-Sleep 1',
     '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
     '      $wDoc = $app.Documents.Open($tmpF, 0, 0); Start-Sleep 3',
@@ -539,7 +539,7 @@ async function extractViaBridgeCOMPdf(messageId, fileName) {
           // Bridge is serving the PDF on localhost. But relay is on home PC so can't access localhost!
           // This method is only useful if Bridge COMresult is the text itself.
           // Fall through to FAIL path.
-          log('[Bridge] PDF 서버 모드 (localhost:7655) - relay는 지근 불가');
+          log('[Bridge] PDF 서버 모드 (localhost:7655) - relay는 접근 불가');
           throw new Error('Bridge는 PDF를 localhost에서 제공합니다. 브라우저 DRM 흐름을 사용하세요.');
         }
         if (result.startsWith('OK:')) {
@@ -569,7 +569,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
   const isDocx   = ['.docx', '.doc'].includes(ext);
   const isPdf    = ext === '.pdf' || (fileBuffer && isPdfBuffer(fileBuffer));
 
-  // ── If file is actually a PDF (DRM-free export), extract as PDF ────────────────
+  // ── If file is actually a PDF (DRM-free export), extract as PDF ──────────────
   if (isPdf) {
     log('[Extract] PDF 파일 감지:', fileName, isPdfBuffer(fileBuffer) ? '(magic bytes)' : '(.pdf ext)');
     try {
@@ -592,7 +592,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
     return `[PDF 텍스트 추출 실패: ${fileName}]\n💡 pip install pdfminer.six 또는 pip install pypdf 설치 필요`;
   }
 
-  // ── Method 1: markitdown ───────────────────────────────────────────────────────
+  // ── Method 1: markitdown ──────────────────────────────────────────────────────
   let e1msg = '';
   try {
     log('[Extract] Method 1: markitdown -', fileName);
@@ -606,7 +606,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
     warn('[Extract] markitdown 실패:', e1msg);
   }
 
-  // ── Method 2: python-pptx (PPTX only) ──────────────────────────────────────────
+  // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────────
   if (isPptx) {
     let e2msg = '';
     try {
@@ -621,7 +621,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
       warn('[Extract] python-pptx 실패:', e2msg);
     }
 
-    // ── Method 3: Bridge COM (회사 PC) ────────────────────────────────────────────
+    // ── Method 3: Bridge COM (회사 PC) ─────────────────────────────────────────
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
       try {
@@ -638,7 +638,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
     }
   }
 
-  // ── DOCX: try Bridge COM ───────────────────────────────────────────────────────
+  // ── DOCX: try Bridge COM ──────────────────────────────────────────────────────
   if (isDocx) {
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
@@ -655,9 +655,9 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
   return `[파일 내용 추출 불가: ${fileName}]\nmarkitdown: ${e1msg || '명령 없음'}\n💡 홈 PC에서 pip install markitdown[all] 실행 후 재시도하세요.`;
 }
 
-// ════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 // Process message
-// ════════════════════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════════════════
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
@@ -668,7 +668,7 @@ async function processMessage(msg) {
   await sendHeartbeat();
 
   try {
-    // ── Download files from file_chunks table ─────────────────────────────────────
+    // ── Download files from file_chunks table ─────────────────────────────────
     if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
       log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
@@ -686,7 +686,7 @@ async function processMessage(msg) {
       }
     }
 
-    // ── Extract text from each file ────────────────────────────────────────────────
+    // ── Extract text from each file ───────────────────────────────────────────
     let fileContentText = '';
     for (const file of attachedFiles) {
       log('[Worker] 파일 내용 추출 시작:', file.name);
@@ -694,16 +694,16 @@ async function processMessage(msg) {
       fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
     }
 
-    // ── Build final prompt ────────────────────────────────────────────────────────
+    // ── Build final prompt ────────────────────────────────────────────────────
     const finalContent = content + fileContentText;
     const prompt = await buildPrompt(chat_id, finalContent);
     log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
-    // ── Run Claude ────────────────────────────────────────────────────────────────
+    // ── Run Claude ────────────────────────────────────────────────────────────
     const response = await runClaude(prompt);
     log('[Worker] 응답 수신:', response.slice(0,60));
 
-    // ── Insert assistant response ──────────────────────────────────────────────────
+    // ── Insert assistant response ─────────────────────────────────────────────
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -716,7 +716,7 @@ async function processMessage(msg) {
     });
 
     try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
-    log('[Worker] 완료 → ', rid.slice(0,8));
+    log('[Worker] 완료 →', rid.slice(0,8));
 
     // Cleanup temp files
     for (const file of attachedFiles) {
@@ -753,7 +753,7 @@ async function processMessage(msg) {
   await sendHeartbeat();
 }
 
-// ── Poll ───────────────────────────────────────────────────────────────────────
+// ── Poll ──────────────────────────────────────────────────────────────────────
 async function poll() {
   if (isProcessing) return;
   try {
@@ -768,19 +768,19 @@ async function poll() {
   }
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 async function main() {
   acquireLock();
 
-  console.log('╔═══════════════════════════════════════════════════════════════╗');
+  console.log('╔══════════════════════════════════════════════════╗');
   console.log('║  Remote Bridge Relay Worker ' + VERSION + '                 ║');
   console.log('║  DRM 흐름: ExportAsFixedFormat → PDF → pdfminer  ║');
   console.log('║  단일 인스턴스 락 (PID 파일)                     ║');
   console.log('║  EAI_AGAIN 재시도 (3x 지수 백오프)               ║');
-  console.log('╠═══════════════════════════════════════════════════════════════╣');
+  console.log('╠══════════════════════════════════════════════════╣');
   console.log('║  Hostname: ' + HOSTNAME.padEnd(38) + '║');
   console.log('║  PID:      ' + String(process.pid).padEnd(38) + '║');
-  console.log('╚═══════════════════════════════════════════════════════════════╝\n');
+  console.log('╚══════════════════════════════════════════════════╝\n');
 
   // Check Claude CLI
   try {
