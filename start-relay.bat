@@ -1,99 +1,78 @@
 @echo off
-chcp 65001 >nul
-title Cowork Relay Worker
+chcp 65001 > nul
+title Remote Bridge Relay v30
 color 0A
 
-echo.
-echo =====================================================
-echo   Cowork Relay Worker  (Home PC)
-echo =====================================================
+echo ============================================================
+echo   Remote Bridge Relay Worker v30 시작
+echo   집 PC에서 실행하세요
+echo ============================================================
 echo.
 
-:: Check Node.js
-where node >nul 2>nul
+:: 1. 기존 relay-worker.js 프로세스 종료
+echo [1/4] 기존 릴레이 프로세스 종료 중...
+taskkill /F /FI "WINDOWTITLE eq Remote Bridge Relay*" /T > nul 2>&1
+:: relay-worker.js를 실행 중의 node.exe 찾아서 종료
+for /f "tokens=2" %%P in ('wmic process where "commandline like '%%relay-worker%%'" get processid 2^>nul ^| findstr /r "[0-9]"') do (
+    echo   PID %%P 종료 중...
+    taskkill /F /PID %%P > nul 2>&1
+)
+:: 락 파일 삭제
+del /f "%TEMP%\relay-worker.lock" > nul 2>&1
+timeout /t 2 /nobreak > nul
+
+:: 2. 최신 relay-worker.js 다운로드
+echo [2/4] GitHub에서 최신 relay-worker.js 다운로드 중...
+set RELAY_DIR=%~dp0
+set RELAY_FILE=%RELAY_DIR%relay-worker.js
+
+powershell -NoProfile -Command ^
+  "try { Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/seongchun/remote-bridge/main/relay-worker.js' -OutFile '%RELAY_FILE%' -UseBasicParsing; Write-Host '  다운로드 완료' } catch { Write-Host '  경고: 다운로드 실패 -' $_.Exception.Message }"
+
+if not exist "%RELAY_FILE%" (
+    echo   [오류] relay-worker.js 파일을 찾을 수 없습니다.
+    echo   수동으로 다운로드 후 같은 폴더에 놓으세요:
+    echo   https://raw.githubusercontent.com/seongchun/remote-bridge/main/relay-worker.js
+    pause
+    exit /b 1
+)
+
+:: 3. node.js 확인
+echo [3/4] Node.js 확인 중...
+where node > nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Node.js not found. Install from https://nodejs.org
-  pause
-  exit /b 1
+    echo   [오류] Node.js가 설치되지 않았습니다.
+    echo   https://nodejs.org 에서 설치하세요.
+    pause
+    exit /b 1
 )
-for /f "tokens=*" %%v in ('node -v 2^>nul') do set NODE_VER=%%v
-echo [OK] Node.js %NODE_VER%
+for /f "tokens=*" %%V in ('node --version 2^>^&1') do echo   Node.js: %%V
 
-:: Add npm global bin to PATH so claude.cmd can be found
-set PATH=%PATH%;%APPDATA%\npm
-set PATH=%PATH%;%APPDATA%\npm\node_modules\.bin
-set PATH=%PATH%;%LOCALAPPDATA%\Programs\claude
-set PATH=%PATH%;%LOCALAPPDATA%\AnthropicClaude
-
-:: Find claude executable
-set CLAUDE_PATH=
-for %%x in (claude.cmd claude.bat claude.exe) do (
-  if not defined CLAUDE_PATH (
-    for /f "tokens=*" %%p in ('where %%x 2^>nul') do (
-      if not defined CLAUDE_PATH set CLAUDE_PATH=%%p
-    )
-  )
-)
-
-if defined CLAUDE_PATH (
-  echo [OK] Claude CLI: %CLAUDE_PATH%
-) else (
-  echo [WARN] Claude CLI not found in PATH. relay-worker will retry.
-  echo [HINT] Run: where claude  - to find the path
-  echo [HINT] Then: set CLAUDE_PATH=full-path-to-claude.cmd
-)
-
-:: Create working directory if needed
-if not exist "%USERPROFILE%\CoworkRelay" (
-  echo [INFO] Creating CoworkRelay folder...
-  mkdir "%USERPROFILE%\CoworkRelay"
-)
-cd /d "%USERPROFILE%\CoworkRelay"
-
-:: Check Python (required for markitdown file extraction)
-where python >nul 2>nul
-if errorlevel 1 (
-  where python3 >nul 2>nul
-  if errorlevel 1 (
-    echo [WARN] Python not found - file extraction will not work
-    echo Install from https://python.org
-  )
-)
-
-:: Check/Install markitdown
-echo [Check] markitdown...
-pip show markitdown >nul 2>nul
-if errorlevel 1 (
-  echo [Install] Installing markitdown for office file extraction...
-  pip install markitdown --quiet 2>nul
-  if errorlevel 1 (
-    python -m pip install markitdown --quiet 2>nul
-    if errorlevel 1 (
-      echo [WARN] markitdown install failed - office file extraction may not work
-    )
-  )
-) else (
-  echo [OK] markitdown installed
-)
-
-:: Download latest relay-worker.js from GitHub
-echo [INFO] Downloading latest relay-worker.js...
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/seongchun/remote-bridge/main/relay-worker.js' -OutFile 'relay-worker.js' -UseBasicParsing; Write-Host '[OK] relay-worker.js updated' } catch { Write-Host '[WARN] Download failed, using cached version' }"
-
-if not exist relay-worker.js (
-  echo [ERROR] relay-worker.js not found.
-  pause
-  exit /b 1
-)
-
-:: Auto-restart loop
+:: 4. 릴레이 실행 (자동 재시작 루프)
+echo [4/4] 릴레이 시작...
 echo.
-echo [INFO] Starting relay... (Ctrl+C to stop)
+echo ============================================================
+echo   [Ctrl+C] 또는 창 닫기 = 종료
+echo ============================================================
 echo.
 
-:restart
-node relay-worker.js
+:RESTART
+echo [%DATE% %TIME%] 릴레이 시작...
+node "%RELAY_FILE%"
+set EXIT_CODE=%errorlevel%
+
+if %EXIT_CODE% == 0 (
+    echo.
+    echo [%DATE% %TIME%] 정상 종료
+    goto END
+)
+
 echo.
-echo [INFO] Relay stopped. Restarting in 3 seconds...
-timeout /t 3 /nobreak >nul
-goto restart
+echo [%DATE% %TIME%] 비정상 종료 (코드=%EXIT_CODE%) - 5초 후 재시작...
+timeout /t 5 /nobreak > nul
+goto RESTART
+
+:END
+echo.
+echo 릴레이가 종료되었습니다.
+pause
