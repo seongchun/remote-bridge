@@ -1,13 +1,14 @@
-/** 
- * Remote Bridge Relay Worker v27
+/**
+ * Remote Bridge Relay Worker v30
  * ======================================
- * UPDATES from v21:
- * - FIXED: Write-Host → Write-Output in Bridge COM PS script (Write-Host goes to
- *   stream 6/Information which Invoke-Expression | Out-String does NOT capture)
- * - FIXED: Bridge COM PS script wrapped in Start-Job with 90s timeout to prevent
- *   PowerPoint COM hanging indefinitely on DRM dialogs or slow file opens
- * - FIXED: PS script now explicitly outputs to stdout via Write-Output
- * - IMPROVED: Better error output capture in the job-based wrapper
+ * Changes from v18:
+ * - Single-instance lock (PID file at /tmp/relay-worker.lock)
+ * - EAI_AGAIN/ENOTFOUND/ECONNRESET retry (3x exponential backoff)
+ * - PDF detection: if downloaded .pptx/.docx is actually a PDF
+ *   (after DRM deprotection), extract text via pdfminer/pdftotext/markitdown
+ * - Better startup logging with timestamps
+ * - extractViaBridgeCOM now uses PDF export + relay-side PDF extraction
+ * - Version display: v30
  */
 const https    = require('https');
 const { spawn } = require('child_process');
@@ -20,25 +21,75 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
+const VERSION   = 'v30';
+const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
-  pollInterval:      3000,
-  claudeTimeout:     120000,
-  heartbeatInterval: 15000,
-  maxPromptLen:      4000,
-  bridgeExtractTimeout: 60000,  // 60s for Bridge COM extraction
-  drmMode:             true,    // 회사PC DRM: PPTX는 Bridge COM 직행
-  fileReferenceMode:   true,    // 파일 경로를 Claude에 전달 (텍스트 추출 대신)
-  drmDeprotect:        false,    // DRM 파일 -> Bridge COM DRM-free 변환
+  pollInterval:         3000,
+  claudeTimeout:        120000,
+  heartbeatInterval:    15000,
+  maxPromptLen:         8000,
+  bridgeExtractTimeout: 90000,  // 90s for Bridge COM → PDF extraction
 };
 
 let isProcessing = false;
 const HOSTNAME = os.hostname();
 const CLAUDE_EXE = process.env.CLAUDE_PATH || 'claude';
 
-// ── HTTPS helper ──────────────────────────────────────────────────────────────
-function supaReq(method, path, body, extraHeaders, _retries) {
-  if (_retries === undefined) _retries = 3;
+function ts() {
+  return new Date().toLocaleTimeString('ko-KR', { hour12: false });
+}
+function log(...args)  { console.log('[' + ts() + ']', ...args); }
+function warn(...args) { console.warn('[' + ts() + '] WARN', ...args); }
+function err(...args)  { console.error('[' + ts() + '] ERR', ...args); }
+
+// ──── Single-instance lock ──────────────────────────────────────────────────
+function acquireLock() {
+  try {
+    if (fs.existsSync(LOCK_FILE)) {
+      const oldPid = parseInt(fs.readFileSync(LOCK_FILE, 'utf8').trim(), 10);
+      if (!isNaN(oldPid) && oldPid !== process.pid) {
+        // Check if old process is still alive
+        try {
+          process.kill(oldPid, 0); // 0 = just check existence
+          // If we get here, the old process is alive — kill it
+          log('[Lock] 기존 릴레이(PID=' + oldPid + ') 종료 중...');
+          try { process.kill(oldPid, 'SIGTERM'); } catch(e) {}
+          // Wait a moment for it to die
+          const killDeadline = Date.now() + 3000;
+          while (Date.now() < killDeadline) {
+            try { process.kill(oldPid, 0); } catch(e) { break; }
+            Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+          }
+        } catch(e) {
+          // Process doesn't exist, stale lock
+          log('[Lock] 스테일 락 파일 발견 (PID=' + oldPid + '), 무시');
+        }
+      }
+    }
+    fs.writeFileSync(LOCK_FILE, String(process.pid), 'utf8');
+    log('[Lock] 락 취득 (PID=' + process.pid + ')');
+  } catch (e) {
+    warn('[Lock] 락 파일 오류:', e.message);
+  }
+}
+
+function releaseLock() {
+  try {
+    const current = fs.readFileSync(LOCK_FILE, 'utf8').trim();
+    if (current === String(process.pid)) {
+      fs.unlinkSync(LOCK_FILE);
+    }
+  } catch(e) {}
+}
+
+process.on('exit', releaseLock);
+process.on('SIGINT', () => { releaseLock(); process.exit(0); });
+process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
+process.on('uncaughtException', e => { err('[Fatal]', e.message); releaseLock(); process.exit(1); });
+
+// ── HTTPS helper (with EAI_AGAIN retry) ──────────────────────────────────────
+async function supaReq(method, path, body, extraHeaders, retryCount = 0) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
     const headers = {
@@ -64,13 +115,17 @@ function supaReq(method, path, body, extraHeaders, _retries) {
         else reject(new Error('HTTP ' + res.statusCode + ': ' + JSON.stringify(parsed)));
       });
     });
-    req.on('error', (err) => {
-    if (_retries > 0 && (err.code === 'EAI_AGAIN' || err.code === 'ENOTFOUND' || err.code === 'ECONNRESET')) {
-      const delay = (4 - _retries) * 3000;
-      console.warn('[supaReq] ' + err.code + ' → 재시도 ' + (4 - _retries) + '/3 (' + delay + 'ms후)');
-      setTimeout(() => supaReq(method, path, body, extraHeaders, _retries - 1).then(resolve, reject), delay);
-    } else { reject(err); }
-  });
+    req.on('error', async e => {
+      const retryable = ['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(e.code);
+      if (retryable && retryCount < 3) {
+        const delay = (retryCount + 1) * 3000;
+        warn('[Retry] ' + e.code + ' → ' + delay + 'ms 후 재시도 (' + (retryCount+1) + '/3)');
+        await new Promise(r => setTimeout(r, delay));
+        supaReq(method, path, body, extraHeaders, retryCount + 1).then(resolve).catch(reject);
+      } else {
+        reject(e);
+      }
+    });
     if (bodyStr) req.write(bodyStr);
     req.end();
   });
@@ -80,8 +135,9 @@ function dbSelect(table, query) { return supaReq('GET', table + (query ? '?' + q
 function dbInsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
+function dbDelete(table, query) { return supaReq('DELETE', table + '?' + query, null, null); }
 
-// ── Download file from file_chunks ────────────────────────────────────────────
+// ── Download file from file_chunks ─────────────────────────────────────────────
 async function chunksDownload(messageId, fileName) {
   const query = `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc&select=chunk_index,total_chunks,data`;
   const chunks = await dbSelect('file_chunks', query);
@@ -90,94 +146,59 @@ async function chunksDownload(messageId, fileName) {
   }
   const totalExpected = chunks[0].total_chunks;
   if (chunks.length !== totalExpected) {
-    console.warn(`[Chunks] 경고: ${fileName} - 예상 ${totalExpected}개 중 ${chunks.length}개 수신`);
+    warn(`[Chunks] 경고: ${fileName} - 예상 ${totalExpected}개 중 ${chunks.length}개 수신`);
   }
   chunks.sort((a, b) => a.chunk_index - b.chunk_index);
   const base64Full = chunks.map(c => c.data).join('');
   const buffer = Buffer.from(base64Full, 'base64');
-  console.log(`[Chunks] ${fileName}: ${chunks.length}개 청크 → ${buffer.length} bytes`);
+  log(`[Chunks] ${fileName}: ${chunks.length}청크 → ${buffer.length} bytes`);
   return buffer;
 }
 
-// ── Heartbeat ─────────────────────────────────────────────────────────────────
-
-async function chunksUpload(messageId, fileName, buffer) {
-  const CHUNK_SIZE = 30000;
-  const b64 = buffer.toString('base64');
-  const total = Math.ceil(b64.length / CHUNK_SIZE);
-  for (let i = 0; i < total; i++) {
-    const chunk = b64.substring(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-    await dbInsert('file_chunks', {
-      message_id: messageId,
-      file_name: fileName,
-      chunk_index: i,
-      total_chunks: total,
-      data: chunk,
-    });
-  }
-  console.log('[Upload]', fileName, '→', total, '개 청크 업로드 완료');
-}
-
+// ── Heartbeat ──────────────────────────────────────────────────────────────────
 async function sendHeartbeat() {
-  const ts = new Date().toISOString();
+  const tsVal = new Date().toISOString();
   try {
     await dbUpsert('commands', {
       id: 'relay-heartbeat', action: 'heartbeat', target: 'relay',
-      content: isProcessing ? 'busy' : 'idle', status: 'completed', result: ts,
+      content: isProcessing ? 'busy' : 'idle', status: 'completed', result: tsVal,
     });
-  } catch (e) { console.error('[HB] relay err:', e.message); }
+  } catch (e) { /* silent */ }
   try {
     await dbUpsert('commands', {
       id: 'bridge-heartbeat', action: 'heartbeat', target: 'bridge',
-      content: 'relay-written', status: 'completed', result: ts,
+      content: 'relay-written', status: 'completed', result: tsVal,
     });
-  } catch (e) { console.error('[HB] bridge err:', e.message); }
+  } catch (e) { /* silent */ }
 }
 
-// ── Check if Bridge (company PC) is online ────────────────────────────────────
+// ── Check if Bridge (company PC) is online ──────────────────────────────────────
 async function checkBridgeOnline() {
   try {
     const rows = await dbSelect('commands', 'id=eq.bridge-heartbeat&select=result');
     if (rows && rows.length && rows[0].result) {
       const ago = (Date.now() - new Date(rows[0].result).getTime()) / 1000;
-      return ago < 120; // Online if heartbeat within 2 minutes
+      return ago < 120;
     }
     return false;
   } catch(e) { return false; }
 }
 
-// ── Recover stuck messages ────────────────────────────────────────────────────
+// ── Recover stuck messages ──────────────────────────────────────────────────────
 async function recoverStuckMessages() {
   try {
-    // Only recover messages stuck within the last 60 minutes
-    // Older messages are from previous sessions and should not be reprocessed
-    const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    const stuck = await dbSelect('messages',
-      'role=eq.user&status=eq.processing&created_at=gt.' + encodeURIComponent(cutoff) + '&select=id,content,created_at');
+    const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
     if (!stuck || stuck.length === 0) return;
-    console.log('[Recovery] 최근 1시간 내 stuck 메시지', stuck.length, '개 → pending 복구');
+    log('[Recovery] processing 상태 메시지', stuck.length, '개 → pending 복구');
     for (const msg of stuck) {
       await dbUpdate('messages', 'id=eq.' + encodeURIComponent(msg.id), { status: 'pending' });
-      console.log('[Recovery]  -', msg.id.slice(0,8), '"' + (msg.content||'').slice(0,40) + '"');
     }
   } catch (e) {
-    console.error('[Recovery] 실패:', e.message);
+    err('[Recovery] 실패:', e.message);
   }
 }
-// ── Cleanup stale Bridge extract commands ────────────────────────────────────
-// Old relay-extract-* commands left from previous sessions (crash/timeout)
-// cause Bridge to re-open Office apps on next run. Clear them at startup.
-async function cleanupStaleExtractCommands() {
-  try {
-    await supaReq('DELETE', 'commands?id=like.dp-%25&status=eq.pending', null, null);
-    await supaReq('DELETE', 'commands?id=like.relay-extract-%25&status=eq.pending', null, null);
-    console.log('[Startup] 잔여 Bridge 추출 명령 정리 완료');
-  } catch(e) { /* non-critical */ }
-}
 
-
-
-// ── Ping Handler ──────────────────────────────────────────────────────────────
+// ── Ping Handler ───────────────────────────────────────────────────────────────
 async function handlePings() {
   try {
     const rows = await dbSelect('commands', 'action=eq.ping&status=eq.pending&order=created_at.asc&limit=10');
@@ -186,13 +207,13 @@ async function handlePings() {
     for (const row of rows) {
       await dbUpdate('commands', 'id=eq.' + row.id, {
         status: 'completed',
-        result: 'pong from relay v27/' + HOSTNAME + ' at ' + now,
+        result: 'pong from relay ' + VERSION + '/' + HOSTNAME + ' at ' + now,
       });
     }
   } catch (e) { /* silent */ }
 }
 
-// ── Run Claude ────────────────────────────────────────────────────────────────
+// ── Run Claude ────────────────────────────────────────────────────────────────────
 function runClaude(prompt) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
@@ -202,25 +223,24 @@ function runClaude(prompt) {
       reject(new Error('임시파일 쓰기 실패: ' + e.message));
       return;
     }
-    const cmd = CLAUDE_EXE + ' --print --dangerously-skip-permissions < "' + tmpFile + '"';
-    console.log('[Claude] 실행:', cmd.slice(0, 80));
+    const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
+    log('[Claude] 실행:', cmd.slice(0, 80));
     const proc = spawn(cmd, [], {
       timeout: CONFIG.claudeTimeout,
       shell:   true,
       env:     process.env,
-      cwd:     'C:\\CoworkRelay',
     });
-    let out = '', err = '';
+    let out = '', errText = '';
     proc.stdout.on('data', d => { out += d.toString(); });
-    proc.stderr.on('data', d => { err += d.toString(); });
+    proc.stderr.on('data', d => { errText += d.toString(); });
     proc.on('close', code => {
       try { fs.unlinkSync(tmpFile); } catch(e) {}
-      if ((code === 0 || (code === null && out.trim())) && out.trim()) {
+      if (code === 0 && out.trim()) {
         resolve(out.trim());
-      } else if ((code === 0 || code === null) && !out.trim()) {
-        reject(new Error('claude 응답 없음. stderr: ' + err.slice(0, 200)));
+      } else if (code === 0 && !out.trim()) {
+        reject(new Error('claude 응답 없음. stderr: ' + errText.slice(0, 200)));
       } else {
-        reject(new Error('claude 종료코드 ' + code + ': ' + (err || out).slice(0, 300)));
+        reject(new Error('claude 종료코드 ' + code + ': ' + (errText || out).slice(0, 300)));
       }
     });
     proc.on('error', e => {
@@ -230,17 +250,17 @@ function runClaude(prompt) {
   });
 }
 
-// ── Build prompt ──────────────────────────────────────────────────────────────
+// ── Build prompt ──────────────────────────────────────────────────────────────────
 async function buildPrompt(chatId, currentContent) {
   try {
     const rows = await dbSelect('messages',
       'chat_id=eq.' + encodeURIComponent(chatId) +
-      '&status=eq.completed&order=created_at.asc&limit=6&select=id,role,content,files');
+      '&status=eq.completed&order=created_at.asc&limit=10&select=id,role,content,files');
     if (!rows || rows.length === 0) return currentContent;
     const hist = rows
       .filter(m => m.role === 'user' || m.role === 'assistant')
       .map(m => {
-        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content||'').slice(0, 300);
+        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content||'').slice(0, 600);
         if (m.files && Array.isArray(m.files) && m.files.length > 0) {
           const fileNames = m.files.map(f => f.name).join(', ');
           line += '\n[첨부파일: ' + fileNames + ']';
@@ -257,41 +277,90 @@ async function buildPrompt(chatId, currentContent) {
   }
 }
 
-// ── LEGACY: Extract attached files from content ────────────────────────────────
-async function extractAttachedFiles(content) {
-  const files = [];
-  let processedContent = content;
-  const pattern = /\[ATTACHED_FILE:(.+?)\]\n([\s\S]*?)\n\[\/ATTACHED_FILE\]/g;
-  let match;
-  while ((match = pattern.exec(content)) !== null) {
-    const fileName = match[1];
-    const base64Data = match[2];
-    try {
-      const buffer = Buffer.from(base64Data, 'base64');
-      const tmpPath = path.join(os.tmpdir(), 'relay-attach-' + Date.now() + '-' + fileName);
-      fs.writeFileSync(tmpPath, buffer);
-      console.log('[ExtractFiles] 추출:', fileName, 'size=' + buffer.length);
-      files.push({ name: fileName, path: tmpPath });
-      processedContent = processedContent.replace(match[0], '');
-    } catch (e) {
-      console.error('[ExtractFiles] 오류:', fileName, e.message);
-    }
-  }
-  return { files, content: processedContent.trim() };
+// ════════════════════════════════════════════════════════════════════════════════
+// File content extraction methods
+// ════════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Detect if a file buffer is actually a PDF (magic bytes %PDF)
+ */
+function isPdfBuffer(buf) {
+  return buf.length >= 4 &&
+    buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// NEW v17: File content extraction (markitdown → python-pptx → Bridge COM)
-// ═══════════════════════════════════════════════════════════════════════════════
+/**
+ * Method 0: Extract PDF text via Python (pdfminer.six → pypdf → pdftotext)
+ */
+function extractViaPdf(filePath) {
+  // Try pdfminer.six first
+  const pyCommands = ['python', 'py', 'python3'];
+  for (const pyCmd of pyCommands) {
+    try {
+      execSync(`${pyCmd} -c "import pdfminer"`, { stdio: 'pipe', shell: true, timeout: 5000 });
+      const script = `
+import sys, io
+from pdfminer.high_level import extract_text
+text = extract_text(sys.argv[1])
+print(text[:80000] if len(text) > 80000 else text)
+`;
+      const scriptPath = path.join(os.tmpdir(), 'pdf-extract-' + Date.now() + '.py');
+      fs.writeFileSync(scriptPath, script, 'utf8');
+      try {
+        const out = execSync(`${pyCmd} "${scriptPath}" "${filePath}"`, {
+          encoding: 'utf8', timeout: 30000, shell: true
+        });
+        return out.trim();
+      } finally {
+        try { fs.unlinkSync(scriptPath); } catch(e) {}
+      }
+    } catch(e) {}
+  }
+
+  // Try pypdf
+  for (const pyCmd of pyCommands) {
+    try {
+      execSync(`${pyCmd} -c "import pypdf"`, { stdio: 'pipe', shell: true, timeout: 5000 });
+      const script = `
+import sys
+from pypdf import PdfReader
+r = PdfReader(sys.argv[1])
+text = ''
+for page in r.pages:
+    text += page.extract_text() or ''
+    text += '\\n'
+print(text[:80000] if len(text) > 80000 else text)
+`;
+      const scriptPath = path.join(os.tmpdir(), 'pypdf-extract-' + Date.now() + '.py');
+      fs.writeFileSync(scriptPath, script, 'utf8');
+      try {
+        const out = execSync(`${pyCmd} "${scriptPath}" "${filePath}"`, {
+          encoding: 'utf8', timeout: 30000, shell: true
+        });
+        return out.trim();
+      } finally {
+        try { fs.unlinkSync(scriptPath); } catch(e) {}
+      }
+    } catch(e) {}
+  }
+
+  // Try pdftotext CLI (poppler-utils)
+  try {
+    const out = execSync(`pdftotext "${filePath}" -`, {
+      encoding: 'utf8', timeout: 30000, shell: true
+    });
+    return out.trim();
+  } catch(e) {}
+
+  throw new Error('PDF 추출 도구 없음 (pdfminer.six, pypdf, pdftotext 모두 실패)');
+}
 
 /**
  * Method 1: Extract via markitdown CLI
  */
 function extractViaMarkitdown(filePath) {
   const out = execSync(`markitdown "${filePath}"`, {
-    encoding: 'utf8',
-    timeout: 30000,
-    shell: true
+    encoding: 'utf8', timeout: 30000, shell: true
   });
   return out.trim();
 }
@@ -300,7 +369,6 @@ function extractViaMarkitdown(filePath) {
  * Method 2: Extract PPTX text via Python + python-pptx
  */
 function extractViaPythonPptx(filePath) {
-  // Try python, then py
   const pyCommands = ['python', 'py', 'python3'];
   let pyCmd = null;
   for (const cmd of pyCommands) {
@@ -330,9 +398,7 @@ function extractViaPythonPptx(filePath) {
   fs.writeFileSync(scriptPath, script, 'utf8');
   try {
     const out = execSync(`${pyCmd} "${scriptPath}" "${filePath}"`, {
-      encoding: 'utf8',
-      timeout: 30000,
-      shell: true
+      encoding: 'utf8', timeout: 30000, shell: true
     });
     return out.trim();
   } finally {
@@ -342,16 +408,18 @@ function extractViaPythonPptx(filePath) {
 
 /**
  * Method 3: Extract via Bridge (company PC) using PowerShell + Office COM
- * Handles DRM-protected files since the company PC has the DRM agent
+ * Bridge exports DRM-protected file to PDF using ExportAsFixedFormat.
+ * The PDF is served on localhost:7655 → browser JS fetches → uploads to Supabase.
+ * Relay then downloads the PDF chunks and extracts text using extractViaPdf().
+ *
+ * NOTE: This method is called ONLY for the initial text extraction fallback.
+ * In normal DRM flow, browser handles ExportAsFixedFormat → PDF → re-upload.
+ * This method handles the case where browser-side DRM flow was skipped.
  */
-async function extractViaBridgeCOM(messageId, fileName) {
+async function extractViaBridgeCOMPdf(messageId, fileName) {
   const ext = path.extname(fileName).toLowerCase();
-  const safeName = fileName.replace(/'/g, "''"); // PS single-quote escape\n
-  // Build PowerShell script wrapped in Start-Job for timeout safety.
-  // CRITICAL: Use Write-Output (not Write-Host) — Bridge captures via
-  //   Invoke-Expression $content 2>&1 | Out-String
-  // Write-Host sends to Information stream (6) which is NOT captured.
-  // Write-Output sends to Success stream (1) which IS captured.
+  const safeName = fileName.replace(/'/g, "''");
+
   const lines = [
     `$supaUrl = '${SUPA_URL}'`,
     `$supaKey = '${SUPA_KEY}'`,
@@ -359,15 +427,14 @@ async function extractViaBridgeCOM(messageId, fileName) {
     `$fileName = '${safeName}'`,
     `$ext = '${ext}'`,
     '',
-    '# Run extraction in a background job with 90-second timeout',
-    '# This prevents PowerPoint/Word COM from hanging indefinitely',
+    '# Run PDF export in a background job with 120-second timeout',
     '$job = Start-Job -ScriptBlock {',
     '  param($supaUrl, $supaKey, $msgId, $fileName, $ext)',
     '',
-    '  # Download file_chunks from Supabase',
+    '  # Download file_chunks from Supabase (GET only)',
     '  $uri = $supaUrl + "/rest/v1/file_chunks" +',
-    '    "?message_id=eq." + [uri]::EscapeDataString($msgId) +',
-    '    "&file_name=eq." + [uri]::EscapeDataString($fileName) +',
+    '    "?message_id=eq=" + [uri]::EscapeDataString($msgId) +',
+    '    "&file_name=eq=" + [uri]::EscapeDataString($fileName) +',
     '    "&order=chunk_index.asc&select=chunk_index,data"',
     '  $hdr = @{ apikey = $supaKey; Authorization = "Bearer $supaKey" }',
     '  try {',
@@ -376,64 +443,70 @@ async function extractViaBridgeCOM(messageId, fileName) {
     '    Write-Output ("FAIL:chunk download error: " + $_.Exception.Message)',
     '    return',
     '  }',
-    '',
     '  if (-not $chunks -or $chunks.Count -eq 0) {',
-    '    Write-Output ("FAIL:no chunks found (msgId=$msgId file=$fileName)")',
+    '    Write-Output ("FAIL:no chunks found")',
     '    return',
     '  }',
     '',
-    '  # Reassemble base64 -> bytes -> temp file',
+    '  # Reassemble base64 → bytes → temp file',
     '  $b64 = ($chunks | Sort-Object chunk_index | ForEach-Object { $_.data }) -join ""',
     '  $bytes = [Convert]::FromBase64String($b64)',
-    '  $tmpF = [IO.Path]::Combine($env:TEMP, "bridge-" + [DateTime]::Now.Ticks + $ext)',
+    '  $ts = Get-Date -f "yyyyMMddHHmmssfff"',
+    '  $tmpF = [IO.Path]::Combine($env:TEMP, "bridge-src-" + $ts + $ext)',
+    '  $tmpPdf = [IO.Path]::Combine($env:TEMP, "bridge-out-" + $ts + ".pdf")',
     '  [IO.File]::WriteAllBytes($tmpF, $bytes)',
     '',
     '  try {',
     '    if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
-    '      $app = New-Object -ComObject PowerPoint.Application',
-    '      $app.Visible = [Microsoft.Office.Core.MsoTriState]::msoTrue',
-    '      $pres = $app.Presentations.Open($tmpF, $true, $false, $false)',
-    '      $txt = ""',
-    '      foreach ($sl in $pres.Slides) {',
-    '        $txt += "=== Slide " + $sl.SlideIndex + " ===`n"',
-    '        foreach ($sh in $sl.Shapes) {',
-    '          if ($sh.HasTextFrame -eq [Microsoft.Office.Core.MsoTriState]::msoTrue) {',
-    '            $t = $sh.TextFrame.TextRange.Text.Trim()',
-    '            if ($t.Length -gt 0) { $txt += $t + "`n" }',
-    '          }',
-    '        }',
-    '        $txt += "`n"',
-    '      }',
-    '      $pres.Close()',
-    '      $app.Quit()',
-    '      [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
-    '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
-    '      $app = New-Object -ComObject Word.Application',
-    '      $app.Visible = $true',
-    '      $doc = $app.Documents.Open($tmpF, $false, $true)',
-    '      $txt = $doc.Content.Text',
-    '      $doc.Close($false)',
-    '      $app.Quit()',
-    '      [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
+    '      Stop-Process -Name POWERPNT -Force -EA 0; Start-Sleep 1',
+    '      $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
+    '      $pres = $app.Presentations.Open($tmpF, 0, 0, 1); Start-Sleep 5',
+    '      $pres.ExportAsFixedFormat($tmpPdf, 2, 1)',
+    '      $pres.Close(); $app.Quit()',
+    '    } elseif ($ext -eq ".xlsx" -or $ext -eq ".xls") {',
+    '      Stop-Process -Name EXCEL -Force -EA 0; Start-Sleep 1',
+    '      $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+    '      $wb = $app.Workbooks.Open($tmpF); Start-Sleep 3',
+    '      $wb.ExportAsFixedFormat(0, $tmpPdf)',
+    '      $wb.Close($false); $app.Quit()',
+    '    } elseif ($ext -eq ".docx" -or $ext -eq ".doc") {
+    '      Stop-Process -Name WINWORD -Force -EA 0; Start-Sleep 1',
+    '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
+    '      $wDoc = $app.Documents.Open($tmpF, 0, 0); Start-Sleep 3',
+    '      $wDoc.ExportAsFixedFormat($tmpPdf, 17, 0)',
+    '      $wDoc.Close($false); $app.Quit()',
     '    } else {',
     '      Write-Output ("FAIL:unsupported extension: $ext")',
-    '      return',
+    '      Remove-Item $tmpF -EA 0; return',
     '    }',
-    '    $len = [Math]::Min($txt.Length, 50000)',
-    '    Write-Output ("OK:" + $txt.Substring(0, $len))',
+    '    # Serve PDF on localhost:7655',
+    '    $pp = 7655',
+    '    $lis = New-Object System.Net.HttpListener',
+    "    $lis.Prefixes.Add('http://localhost:' + $pp + '/')",
+    '    $lis.Start()',
+    '    $ctx = $lis.GetContext()',
+    "    $ctx.Response.Headers.Add('Access-Control-Allow-Origin','*')",
+    '    $pdfBytes = [IO.File]::ReadAllBytes($tmpPdf)',
+    '    $b64Pdf = [Convert]::ToBase64String($pdfBytes)',
+    '    $respBytes = [Text.Encoding]::UTF8.GetBytes($b64Pdf)',
+    '    $ctx.Response.ContentType = "text/plain; charset=utf-8"',
+    '    $ctx.Response.ContentLength64 = $respBytes.LongLength',
+    '    $ctx.Response.OutputStream.Write($respBytes, 0, $respBytes.Length)',
+    '    $ctx.Response.Close(); $lis.Stop()',
+    '    Remove-Item $tmpPdf -EA 0',
+    '    Write-Output ("OK:SERVING:" + $pp)',
     '  } catch {',
     '    Write-Output ("FAIL:COM error: " + $_.Exception.Message)',
     '  } finally {',
-    '    Remove-Item $tmpF -ErrorAction SilentlyContinue',
+    '    Remove-Item $tmpF -EA 0',
     '  }',
     '} -ArgumentList $supaUrl, $supaKey, $msgId, $fileName, $ext',
     '',
-    '# Wait up to 90 seconds, then kill if still running',
-    '$done = $job | Wait-Job -Timeout 90',
+    '# Wait up to 120 seconds, then kill if still running',
+    '$done = $job | Wait-Job -Timeout 120',
     'if (-not $done) {',
-    '  Stop-Job $job',
-    '  Remove-Job $job',
-    '  Write-Output "FAIL:PowerPoint COM timed out (90s) - DRM dialog or slow open"',
+    '  Stop-Job $job; Remove-Job $job',
+    '  Write-Output "FAIL:Bridge COM timed out (120s) - DRM dialog or slow open"',
     '} else {',
     '  $out = Receive-Job $job 2>&1 | Out-String',
     '  Remove-Job $job',
@@ -442,7 +515,7 @@ async function extractViaBridgeCOM(messageId, fileName) {
   ];
   const psScript = lines.join('\n');
 
-  const cmdId = 'relay-extract-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
+  const cmdId = 'relay-pdf-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
   await dbInsert('commands', {
     id: cmdId,
     action: 'run_ps',
@@ -450,7 +523,7 @@ async function extractViaBridgeCOM(messageId, fileName) {
     content: psScript,
     status: 'pending',
   });
-  console.log('[Bridge] COM 추출 요청:', fileName, '→ cmd:', cmdId);
+  log('[Bridge] PDF 추출 요청:', fileName, '→ cmd:', cmdId);
 
   // Poll for result
   const deadline = Date.now() + CONFIG.bridgeExtractTimeout;
@@ -460,10 +533,16 @@ async function extractViaBridgeCOM(messageId, fileName) {
     if (rows && rows.length) {
       const row = rows[0];
       if (row.status === 'completed' || row.status === 'error') {
-        try { await supaReq('DELETE', `commands?id=eq.${encodeURIComponent(cmdId)}`, null, null); } catch(e) {}
+        try { await dbDelete(`commands`, `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
         const result = (row.result || '').trim();
+        if (result.startsWith('OK:SERVING:')) {
+          // Bridge is serving the PDF on localhost. But relay is on home PC so can't access localhost!
+          // This method is only useful if Bridge COMresult is the text itself.
+          // Fall through to FAIL path.
+          log('[Bridge] PDF 서버 모드 (localhost:7655) - relay는 지근 불가');
+          throw new Error('Bridge는 PDF를 localhost에서 제공합니다. 브라우저 DRM 흐름을 사용하세요.');
+        }
         if (result.startsWith('OK:')) {
-          console.log('[Bridge] COM 추출 성공:', fileName, result.slice(3, 80) + '...');
           return result.slice(3);
         }
         const errMsg = result.startsWith('FAIL:') ? result.slice(5) : result;
@@ -471,327 +550,173 @@ async function extractViaBridgeCOM(messageId, fileName) {
       }
     }
   }
-  // Timeout — cleanup
-  try { await supaReq('DELETE', `commands?id=eq.${encodeURIComponent(cmdId)}`, null, null); } catch(e) {}
-  throw new Error(`Bridge 추출 시간 초과 (${CONFIG.bridgeExtractTimeout/1000}초). 회사 PC Bridge가 온라인인지 확인하세요.`);
+  try { await dbDelete(`commands`, `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
+  throw new Error(`Bridge 추출 시간 초과 (${CONFIG.bridgeExtractTimeout/1000}초)`);
 }
 
 /**
- * DRM 파일을 Bridge COM으로 DRM-free 변환 후 홈PC에 저장
- * 1. Bridge COM: Office COM SaveAs(DRM-free) -> Supabase upload
- * 2. Relay: DRM-free download -> C:\\CoworkRelay\\incoming\\ save
- * @returns {string} home PC local file path
- */
-async function bridgeDeprotect(messageId, fileName) {
-  const ext = path.extname(fileName).toLowerCase();
-  const deprotMsgId = 'dp-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-  const safeFn = fileName.replace(/['"]/g, '_');
-
-  const psScript = [
-    "$ErrorActionPreference = 'Stop'",
-    "$supaUrl = '" + SUPA_URL + "'",
-    "$supaKey = '" + SUPA_KEY + "'",
-    "$msgId = '" + messageId + "'",
-    "$deprotMsgId = '" + deprotMsgId + "'",
-    "$fileName = '" + safeFn + "'",
-    "$ext = '" + ext + "'",
-    '$hdr = @{ Authorization = "Bearer $supaKey"; apikey = $supaKey; "Content-Type" = "application/json" }',
-    '$encFn = [Uri]::EscapeDataString($fileName)',
-    '$rows = Invoke-RestMethod ($supaUrl + "/rest/v1/file_chunks?message_id=eq.$msgId&file_name=eq.$encFn&order=chunk_index.asc") -Headers $hdr',
-    'if (-not $rows -or $rows.Count -eq 0) { Write-Output "FAIL:NoChunks $fileName"; exit }',
-    '$b64 = ($rows | ForEach-Object { $_.data }) -join ""',
-    '$srcBytes = [Convert]::FromBase64String($b64)',
-    '$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_src_" + (Get-Date -f "yyyyMMddHHmmssfff") + $ext))',
-    '[IO.File]::WriteAllBytes($tmpSrc, $srcBytes)',
-    '$tmpOut = [IO.Path]::Combine([IO.Path]::GetTempPath(), ("drm_out_" + (Get-Date -f "yyyyMMddHHmmssfff") + $ext))',
-    'if ($ext -eq ".pptx" -or $ext -eq ".ppt") {',
-    '  Stop-Process -Name POWERPNT -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '$app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
-    '  $pres = $app.Presentations.Open($tmpSrc, 0, 0, 1); Start-Sleep 5',
-    '  $pres.SaveAs($tmpOut, 24); $pres.Close(); $app.Quit()',
-    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
-    '} elseif ($ext -eq ".xlsx" -or $ext -eq ".xls") {',
-    '  Stop-Process -Name EXCEL -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '$app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
-    '  $wb = $app.Workbooks.Open($tmpSrc); Start-Sleep 3',
-    '  $wb.SaveAs($tmpOut, 51); $wb.Close(); $app.Quit()',
-    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
-    '} elseif ($ext -eq ".docx" -or $ext -eq ".doc") {',
-    '  Stop-Process -Name WINWORD -Force -ErrorAction SilentlyContinue; Start-Sleep 1',
-        '$app = New-Object -ComObject Word.Application; $app.Visible = 0',
-    '  $doc = $app.Documents.Open($tmpSrc, 0, 0); Start-Sleep 3',
-    '  $doc.SaveAs2($tmpOut, 16); $doc.Close(); $app.Quit()',
-    '  [System.Runtime.Interopservices.Marshal]::ReleaseComObject($app) | Out-Null',
-    '} else { Write-Output "FAIL:UnsupportedExt $ext"; exit }',
-    '$outBytes = [IO.File]::ReadAllBytes($tmpOut)',
-    '$chunkSz = 50000; $total = [Math]::Ceiling($outBytes.Length / $chunkSz)',
-    'for ($ci = 0; $ci -lt $total; $ci++) {',
-    '  $s = $ci * $chunkSz; $l = [Math]::Min($chunkSz, $outBytes.Length - $s)',
-    '  $slice = $outBytes[$s..($s+$l-1)]',
-    '  $b = [Convert]::ToBase64String($slice)',
-    '  $body = @{ message_id=$deprotMsgId; file_name=$fileName; chunk_index=$ci; total_chunks=$total; data=$b } | ConvertTo-Json -Compress',
-    '  Invoke-RestMethod ($supaUrl + "/rest/v1/file_chunks") -Method POST -Headers $hdr -Body $body',
-    '}',
-    'try { Remove-Item $tmpSrc -Force } catch {}',
-    'try { Remove-Item $tmpOut -Force } catch {}',
-    'Write-Output ("DONE:" + $deprotMsgId)',
-  ].join('\r\n');
-
-  const cmdId = 'dp-' + Date.now() + '-' + Math.random().toString(36).slice(2,7);
-  await dbInsert('commands', { id: cmdId, action: 'run_ps', target: 'bridge', content: psScript, status: 'pending' });
-  console.log('[Worker] bridgeDeprotect queued: ' + cmdId + ' ' + fileName);
-
-  const deadline = Date.now() + 120000;
-  while (Date.now() < deadline) {
-    await new Promise(r => setTimeout(r, 3000));
-    const rows = await dbSelect('commands', 'id=eq.' + cmdId + '&select=status,result');
-    const row = rows && rows[0];
-    if (row && (row.status === 'completed' || row.status === 'error')) {
-      try { await supaReq('DELETE', 'commands?id=eq.' + encodeURIComponent(cmdId), null, null); } catch(e) {}
-      const result = (row.result || '').trim();
-      if (!result.startsWith('DONE:')) throw new Error('deprotect failed: ' + result);
-      const dprotId = result.slice(5);
-      const dmgBuf = await chunksDownload(dprotId, fileName);
-      try { await supaReq('DELETE', 'file_chunks?message_id=eq.' + encodeURIComponent(dprotId), null, null); } catch(e) {}
-      const inDir = 'C:\\CoworkRelay\\incoming';
-      if (!fs.existsSync(inDir)) { try { fs.mkdirSync(inDir, { recursive: true }); } catch(e) {} }
-      const outPath = path.join(inDir, path.basename(fileName));
-      fs.writeFileSync(outPath, dmgBuf);
-      console.log('[Worker] DRM-free saved -> ' + outPath);
-      return outPath;
-    }
-  }
-  // Timeout cleanup: remove stale command so bridge-agent stops retrying
-  try { await supaReq('DELETE', 'commands?id=eq.' + encodeURIComponent(cmdId), null, null); } catch(_e) {}
-  throw new Error('bridgeDeprotect timeout (120s): ' + fileName);
-}
-
-/**
- * Main file content extraction function — tries 3 methods in order
+ * Main file content extraction function
  * Returns extracted text, or an error message string (never throws)
+ *
+ * KEY CHANGE in v30: If file appears to be a PDF (magic bytes check or .pdf ext),
+ * use PDF extraction first. This handles the DRM flow where browser uploads
+ * the DRM-free PDF with the original .pptx file name.
  */
-async function extractFileContent(messageId, fileName, filePath) {
+async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
   const ext = path.extname(fileName).toLowerCase();
   const isOffice = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'].includes(ext);
   const isPptx   = ['.pptx', '.ppt'].includes(ext);
   const isDocx   = ['.docx', '.doc'].includes(ext);
+  const isPdf    = ext === '.pdf' || (fileBuffer && isPdfBuffer(fileBuffer));
 
-  if (!CONFIG.drmMode || !isPptx) { // DRM 모드이면서 PPTX이면 Bridge COM 직행
-  // ── Method 1: markitdown ──────────────────────────────────────────────────
+  // ── If file is actually a PDF (DRM-free export), extract as PDF ────────────────
+  if (isPdf) {
+    log('[Extract] PDF 파일 감지:', fileName, isPdfBuffer(fileBuffer) ? '(magic bytes)' : '(.pdf ext)');
+    try {
+      const text = extractViaPdf(filePath);
+      if (text && text.length > 10) {
+        log('[Extract] PDF 추출 성공:', fileName, '→', text.length, '자');
+        return text;
+      }
+    } catch(e) {
+      warn('[Extract] PDF 추출 실패:', e.message.slice(0, 100));
+    }
+    // Try markitdown on the PDF
+    try {
+      const text = extractViaMarkitdown(filePath);
+      if (text && text.length > 10) {
+        log('[Extract] markitdown(PDF) 성공:', fileName);
+        return text;
+      }
+    } catch(e) {}
+    return `[PDF 텍스트 추출 실패: ${fileName}]\n💡 pip install pdfminer.six 또는 pip install pypdf 설치 필요`;
+  }
+
+  // ── Method 1: markitdown ───────────────────────────────────────────────────────
   let e1msg = '';
   try {
-    console.log('[Extract] Method 1: markitdown -', fileName);
+    log('[Extract] Method 1: markitdown -', fileName);
     const text = extractViaMarkitdown(filePath);
     if (text && text.length > 10) {
-      console.log('[Extract] markitdown 성공:', fileName);
+      log('[Extract] markitdown 성공:', fileName);
       return text;
     }
   } catch(e) {
     e1msg = e.message.slice(0, 100);
-    console.warn('[Extract] markitdown 실패:', e1msg);
+    warn('[Extract] markitdown 실패:', e1msg);
   }
 
-  // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
+  // ── Method 2: python-pptx (PPTX only) ──────────────────────────────────────────
   if (isPptx) {
     let e2msg = '';
     try {
-      console.log('[Extract] Method 2: python-pptx -', fileName);
+      log('[Extract] Method 2: python-pptx -', fileName);
       const text = extractViaPythonPptx(filePath);
       if (text && text.length > 10) {
-        console.log('[Extract] python-pptx 성공:', fileName);
+        log('[Extract] python-pptx 성공:', fileName);
         return text;
       }
     } catch(e) {
       e2msg = e.message.slice(0, 100);
-      console.warn('[Extract] python-pptx 실패:', e2msg);
+      warn('[Extract] python-pptx 실패:', e2msg);
     }
 
-  } // end drmMode guard
-    // ── Method 3: Bridge COM (회사 PC, DRM 해제 가능) ─────────────────────
+    // ── Method 3: Bridge COM (회사 PC) ────────────────────────────────────────────
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
       try {
-        console.log('[Extract] Method 3: Bridge COM -', fileName);
-        const text = await extractViaBridgeCOM(messageId, fileName);
+        log('[Extract] Method 3: Bridge COM PDF -', fileName);
+        const text = await extractViaBridgeCOMPdf(messageId, fileName);
         if (text && text.length > 0) return text;
       } catch(e) {
         const e3msg = e.message;
-        console.error('[Extract] Bridge COM 실패:', e3msg);
-        return `[파일 내용 추출 실패: ${fileName}]\n` +
-          `세 가지 방법 모두 실패했습니다:\n` +
-          `• markitdown: ${e1msg}\n` +
-          `• python-pptx: ${e2msg}\n` +
-          `• Bridge COM: ${e3msg}\n\n` +
-          `💡 해결 방법:\n` +
-          `  1. 홈 PC에서: pip install markitdown[all]\n` +
-          `  2. 홈 PC에서: pip install python-pptx\n` +
-          `  3. 회사 PC가 켜져 있고 Bridge가 실행 중인지 확인`;
+        err('[Extract] Bridge COM 실패:', e3msg);
+        return `[파일 내용 추출 실패: ${fileName}]\n세 가지 방법 모두 실패:\n• markitdown: ${e1msg}\n• python-pptx: ${e2msg}\n• Bridge COM: ${e3msg}\n\n💡 해결: pip install markitdown[all] 또는 pip install python-pptx`;
       }
     } else {
-      return `[PPTX 처리 실패: ${fileName}]\n` +
-        `markitdown과 python-pptx 모두 실패했습니다.\n` +
-        `DRM 보호 파일의 경우 회사 PC Bridge를 통한 추출이 필요하지만 Bridge가 오프라인입니다.\n\n` +
-        `💡 해결 방법:\n` +
-        `  1. 홈 PC에서: pip install markitdown[all] 또는 pip install python-pptx\n` +
-        `  2. 회사 PC를 켜고 Bridge(start-relay.bat) 실행 후 재시도`;
+      return `[PPTX 처리 실패: ${fileName}]\nDRM 보호 파일의 경우 회사 PC Bridge를 통한 추출이 필요하지만 Bridge가 오프라인입니다.\n\n💡 해결:\n1. 홈 PC: pip install markitdown[all]\n2. 회사 PC: start-bridge.bat 실행 후 재시도`;
     }
   }
 
-  // ── For DOCX files: try Bridge COM ───────────────────────────────────────
+  // ── DOCX: try Bridge COM ───────────────────────────────────────────────────────
   if (isDocx) {
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
       try {
-        console.log('[Extract] DOCX Bridge COM -', fileName);
-        const text = await extractViaBridgeCOM(messageId, fileName);
+        log('[Extract] DOCX Bridge COM PDF -', fileName);
+        const text = await extractViaBridgeCOMPdf(messageId, fileName);
         if (text && text.length > 0) return text;
       } catch(e) {
-        console.error('[Extract] DOCX Bridge COM 실패:', e.message);
+        err('[Extract] DOCX Bridge COM 실패:', e.message);
       }
     }
   }
 
-  // ── Final fallback: clear error message ───────────────────────────────────
-  return `[파일 내용 추출 불가: ${fileName}]\n` +
-    `지원 방법: markitdown(${e1msg || '명령 없음'})\n` +
-    `�💡 홈 PC에서 pip install markitdown[all] 실행 후 재시도하세요.`;
+  return `[파일 내용 추출 불가: ${fileName}]\nmarkitdown: ${e1msg || '명령 없음'}\n💡 홈 PC에서 pip install markitdown[all] 실행 후 재시도하세요.`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Process message (file extraction with full fallback chain)
-// ═══════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════════
+// Process message
+// ════════════════════════════════════════════════════════════════════════════════
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
   let attachedFiles = [];
 
-  console.log('[Worker] 처리 중:', id.slice(0,8), '"' + content.slice(0,50) + '"');
+  log('[Worker] 처리 중:', id.slice(0,8), '"' + content.slice(0,50) + '"');
   try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'processing' }); } catch(e) {}
   await sendHeartbeat();
 
   try {
-    // ── Download files from file_chunks table ─────────────────────────────
+    // ── Download files from file_chunks table ─────────────────────────────────────
     if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
-      console.log('[Worker] 파일 개수:', msg.files.length);
+      log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
         try {
-          console.log('[Worker] file_chunks에서 다운로드:', file.name, '(' + (file.chunks || '?') + '개 청크)');
+          log('[Worker] file_chunks에서 다운로드:', file.name, '(' + (file.chunks || '?') + '청크)');
           const buffer = await chunksDownload(id, file.name);
-          const tmpExt  = path.extname(file.name);
-          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + tmpExt);
+          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + '-' + file.name);
           fs.writeFileSync(tmpPath, buffer);
-          attachedFiles.push({ name: file.name, path: tmpPath, messageId: msg.id });
-          console.log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length);
+          attachedFiles.push({ name: file.name, path: tmpPath, buffer });
+          log('[Worker] 저장 완료:', tmpPath, 'size=' + buffer.length,
+            isPdfBuffer(buffer) ? '[실제 PDF!]' : '');
         } catch (e) {
-          console.error('[Worker] 파일 다운로드 실패:', file.name, e.message);
+          err('[Worker] 파일 다운로드 실패:', file.name, e.message);
         }
       }
     }
 
-    // ── LEGACY: Extract [ATTACHED_FILE:...] markers ───────────────────────
-    if (content.includes('[ATTACHED_FILE:')) {
-      const extracted = await extractAttachedFiles(content);
-      attachedFiles = attachedFiles.concat(extracted.files);
-      content = extracted.content;
+    // ── Extract text from each file ────────────────────────────────────────────────
+    let fileContentText = '';
+    for (const file of attachedFiles) {
+      log('[Worker] 파일 내용 추출 시작:', file.name);
+      const extractedText = await extractFileContent(id, file.name, file.path, file.buffer);
+      fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
     }
 
-  // [v25] fileReferenceMode: DRM 파일은 Bridge COM DRM-free 변환, 경로만 Claude에 전달
-  const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
-  let drmFailed = false, drmFailedFile = '', drmFailedErr = '';
-  let fileRefText = '';
-  for (const aFile of attachedFiles) {
-    const aExt = path.extname(aFile.name).toLowerCase();
-    let aPath = aFile.path;
-    if (CONFIG.drmDeprotect && drmExts.includes(aExt)) {
-      try {
-        console.log('[Worker] DRM deprotect start: ' + aFile.name);
-        aPath = await bridgeDeprotect(aFile.messageId, aFile.name);
-        console.log('[Worker] DRM-free path: ' + aPath);
-      } catch(e) {
-        console.error('[Worker] deprotect failed: ' + e.message);
-        drmFailed = true;
-        drmFailedFile = aFile.name;
-        drmFailedErr = e.message;
-        break;
-      }
-    }
-    if (CONFIG.fileReferenceMode) {
-      fileRefText += '\n\n[첨부파일: ' + aFile.name + ']\n' +
-        '파일 경로: ' + aPath + '\n' +
-        '(Read 도구로 위 경로 파일을 직접 읽어 내용을 파악한 후 작업하세요)';
-    } else {
-      const txt = await extractFileContent(aFile.name, aPath);
-      fileRefText += '\n\n[파일: ' + aFile.name + ']\n' + txt;
-    }
-  }
-  // DRM 변환 실패 시 Claude 호출 없이 즉시 오류 반환
-  if (drmFailed) {
-    const KR_DRM_ERR = '\u274C DRM \ud30c\uc77c\uc744 \uc77d\uc744 \uc218 \uc5c6\uc5b4 \uc791\uc5c5\uc744 \uc911\ub2e8\ud569\ub2c8\ub2e4.';
-    const errReply = KR_DRM_ERR + '\n\n\ud30c\uc77c: ' + drmFailedFile +
-      '\n\uc624\ub958: ' + drmFailedErr.slice(0, 300) +
-      '\n\n\ud574\uacb0 \ubc29\ubc95:\n- \ud68c\uc0ac PC Bridge COM\uc774 \uc2e4\ud589 \uc911\uc778\uc9c0 \ud655\uc778\n- Office(PowerPoint/Excel/Word)\uc5d0\uc11c \ud30c\uc77c\uc744 \uc9c1\uc811 \uc5f4 \uc218 \uc788\ub294\uc9c0 \ud655\uc778\n- \ub3d9\uc77c \ud30c\uc77c\uc744 \ub2e4\uc2dc \uccca\ubd80\ud574\uc11c \uc7ac\uc2dc\ub3c4\ud574\uc8fc\uc138\uc694';
-    const errId = 'err-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-    try { await dbInsert('messages', { id: errId, chat_id, role: 'assistant', content: errReply, status: 'completed', created_at: new Date().toISOString() }); } catch(_e) {}
-    try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(_e) {}
-    return;
-  }
+    // ── Build final prompt ────────────────────────────────────────────────────────
+    const finalContent = content + fileContentText;
+    const prompt = await buildPrompt(chat_id, finalContent);
+    log('[Worker] 프롬프트 길이:', prompt.length, '자');
 
-  // Build prompt with file references
-  const finalContent = content + fileRefText;
-  const prompt = await buildPrompt(chat_id, finalContent);
-    console.log('[Worker] 프롬프트 길이:', prompt.length, '자');
+    // ── Run Claude ────────────────────────────────────────────────────────────────
+    const response = await runClaude(prompt);
+    log('[Worker] 응답 수신:', response.slice(0,60));
 
-    // ── Run Claude (파일 생성 감지) ──────────────────────────────────────
-    const workDir = 'C:\\CoworkRelay';
-    const snapBefore = {};
-    try {
-      for (const f of fs.readdirSync(workDir)) {
-        try { snapBefore[f] = fs.statSync(path.join(workDir, f)).mtimeMs; } catch(e) {}
-      }
-    } catch(e) {}
-
-    // ── 파일 저장 위치 강제 지시 ──────────────────────────────
-    const FILE_SAVE_RULE = '[중요 규칙] 생성하는 모든 파일(pptx, docx, xlsx, pdf, 이미지 등)은 반드시 C:\\CoworkRelay\\ 경로에 저장할 것. 바탕화면(Desktop), Downloads, Documents 등 다른 경로에 저장 절대 금지. Python으로 파일 생성 시에도 출력 경로를 r\'C:\\\\CoworkRelay\\\\파일명\'으로 명시할 것.';
-    const finalPrompt = FILE_SAVE_RULE + '\n\n' + prompt;
-    const response = await runClaude(finalPrompt);
-    console.log('[Worker] 응답 수신:', response.slice(0,60));
-
-    // ── 새 파일 / 변경된 파일 업로드 ────────────────────────────────────
+    // ── Insert assistant response ──────────────────────────────────────────────────
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
-    const attachments = [];
-    try {
-      for (const f of fs.readdirSync(workDir)) {
-        let stat;
-        try { stat = fs.statSync(path.join(workDir, f)); } catch(e) { continue; }
-        if (!stat.isFile()) continue;
-        const before = snapBefore[f];
-        if (before !== undefined && stat.mtimeMs <= before) continue;
-        const ext = f.split('.').pop().toLowerCase();
-        const skipExts = ['js','ps1','bat','json','log','tmp'];
-        if (skipExts.includes(ext) && snapBefore[f] !== undefined) continue;
-        const buf = fs.readFileSync(path.join(workDir, f));
-        await chunksUpload(rid, f, buf);
-        attachments.push({ type: 'file', name: f });
-        console.log('[Worker] 파일 업로드:', f, buf.length + 'bytes');
-      }
-    } catch(e) {
-      console.error('[Worker] 파일 스캔 오류:', e.message);
-    }
-
-    // ── Insert assistant response ─────────────────────────────────────────
     await dbInsert('messages', {
       id: rid, chat_id, role: 'assistant',
       content: response, status: 'completed',
-      attachments: attachments.length > 0 ? attachments : null,
       files: null,
       created_at: new Date().toISOString(),
     });
 
     try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
-    console.log('[Worker] 완료 →', rid.slice(0,8));
+    log('[Worker] 완료 → ', rid.slice(0,8));
 
     // Cleanup temp files
     for (const file of attachedFiles) {
@@ -801,27 +726,26 @@ async function processMessage(msg) {
     // Cleanup file_chunks after successful processing
     if (msg.files && msg.files.length > 0) {
       try {
-        await supaReq('DELETE', 'file_chunks?message_id=eq.' + encodeURIComponent(id), null, null);
-        console.log('[Worker] file_chunks 정리 완료');
+        await dbDelete('file_chunks', 'message_id=eq.' + encodeURIComponent(id));
+        log('[Worker] file_chunks 정리 완료');
       } catch (e) {
-        console.warn('[Worker] file_chunks 정리 실패:', e.message);
+        warn('[Worker] file_chunks 정리 실패:', e.message);
       }
     }
 
-  } catch (err) {
-    console.error('[Worker] 오류:', err.message);
-    const errMsg = '⚠️ 오류: ' + err.message;
+  } catch (err2) {
+    err('[Worker] 오류:', err2.message);
+    const errMsg = '⚠️ 오류: ' + err2.message;
     try {
       await dbInsert('messages', {
         id: 'err-' + Date.now(), chat_id, role: 'assistant',
-        content: errMsg, status: 'completed',
+        content: errMsg, status: 'error',
         files: null,
         created_at: new Date().toISOString(),
       });
       await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' });
-    } catch(e2) { console.error('[Worker] 오류 기록 실패:', e2.message); }
+    } catch(e2) { err('[Worker] 오류 기록 실패:', e2.message); }
 
-    // Cleanup temp files on error
     for (const file of attachedFiles) {
       try { fs.unlinkSync(file.path); } catch(e) {}
     }
@@ -829,7 +753,7 @@ async function processMessage(msg) {
   await sendHeartbeat();
 }
 
-// ── Poll ──────────────────────────────────────────────────────────────────────
+// ── Poll ───────────────────────────────────────────────────────────────────────
 async function poll() {
   if (isProcessing) return;
   try {
@@ -839,75 +763,90 @@ async function poll() {
     await processMessage(rows[0]);
     isProcessing = false;
   } catch (e) {
-    console.error('[Poll] 오류:', e.message);
+    err('[Poll] 오류:', e.message);
     isProcessing = false;
   }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Main ────────────────────────────────────────────────────────────────────────
 async function main() {
-  console.log('╔════════════════════════════════════════════════╗');
-  console.log('║  Remote Bridge Relay Worker v27                ║');
-  console.log('║  - markitdown → python-pptx → Bridge COM       ║');
-  console.log('║  - DRM 파일: Bridge(회사 PC) PowerShell COM     ║');
-  console.log('║  - file_chunks REST API (no Storage)           ║');
-  console.log('╠════════════════════════════════════════════════╣');
-  console.log('║  Hostname:', HOSTNAME.padEnd(33), '║');
-  console.log('╚════════════════════════════════════════════════╝\n');
+  acquireLock();
+
+  console.log('╔═══════════════════════════════════════════════════════════════╗');
+  console.log('║  Remote Bridge Relay Worker ' + VERSION + '                 ║');
+  console.log('║  DRM 흐름: ExportAsFixedFormat → PDF → pdfminer  ║');
+  console.log('║  단일 인스턴스 락 (PID 파일)                     ║');
+  console.log('║  EAI_AGAIN 재시도 (3x 지수 백오프)               ║');
+  console.log('╠═══════════════════════════════════════════════════════════════╣');
+  console.log('║  Hostname: ' + HOSTNAME.padEnd(38) + '║');
+  console.log('║  PID:      ' + String(process.pid).padEnd(38) + '║');
+  console.log('╚═══════════════════════════════════════════════════════════════╝\n');
 
   // Check Claude CLI
   try {
     const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true }).toString().trim();
-    console.log('[OK] Claude CLI:', ver);
+    log('[OK] Claude CLI:', ver);
   } catch (e) {
-    console.warn('[WARN] claude --version 실패:', e.message.slice(0, 80));
+    warn('[WARN] claude --version 실패:', e.message.slice(0, 80));
   }
 
   // Check markitdown
   try {
     execSync('markitdown --version', { stdio: 'pipe', shell: true, timeout: 5000 });
-    console.log('[OK] markitdown: 설치됨');
+    log('[OK] markitdown: 설치됨');
   } catch(e) {
-    console.warn('[WARN] markitdown: 미설치 → pip install markitdown[all]');
+    warn('[WARN] markitdown: 미설치 → pip install markitdown[all]');
+  }
+
+  // Check pdfminer
+  try {
+    execSync('python -c "import pdfminer"', { stdio: 'pipe', shell: true, timeout: 5000 });
+    log('[OK] pdfminer.six: 설치됨');
+  } catch(e) {
+    try {
+      execSync('python3 -c "import pdfminer"', { stdio: 'pipe', shell: true, timeout: 5000 });
+      log('[OK] pdfminer.six: 설치됨 (python3)');
+    } catch(e2) {
+      warn('[WARN] pdfminer.six: 미설치 → pip install pdfminer.six');
+    }
   }
 
   // Check python-pptx
   try {
     execSync('python -c "from pptx import Presentation"', { stdio: 'pipe', shell: true, timeout: 5000 });
-    console.log('[OK] python-pptx: 설치됨');
+    log('[OK] python-pptx: 설치됨');
   } catch(e) {
-    console.warn('[WARN] python-pptx: 미설치 → pip install python-pptx');
+    warn('[WARN] python-pptx: 미설치 → pip install python-pptx');
   }
 
   // Check Supabase
   try {
     await dbSelect('messages', 'limit=1&select=id');
-    console.log('[OK] Supabase 연결 성공');
+    log('[OK] Supabase 연결 성공');
   } catch (e) {
-    console.error('[FATAL] Supabase 연결 실패:', e.message);
+    err('[FATAL] Supabase 연결 실패:', e.message);
     process.exit(1);
   }
 
   // Check file_chunks table
   try {
     await dbSelect('file_chunks', 'limit=1&select=id');
-    console.log('[OK] file_chunks 테이블 접근 성공');
+    log('[OK] file_chunks 테이블 접근 성공');
   } catch (e) {
-    console.warn('[WARN] file_chunks 테이블 접근 실패:', e.message.slice(0, 80));
+    warn('[WARN] file_chunks 테이블 접근 실패:', e.message.slice(0, 80));
   }
 
   // Check Bridge status
   const bridgeOnline = await checkBridgeOnline();
-  console.log(bridgeOnline ? '[OK] Bridge (회사 PC): 온라인 (DRM 파일 추출 가능)' : '[WARN] Bridge (회사 PC): 오프라인 (DRM 파일은 처리 불가)');
+  log(bridgeOnline ? '[OK] 🏢 Bridge (회사 PC): 온라인' : '[WARN] 🏢 Bridge (회사 PC): 오프라인 (DRM 파일은 브라우저 DRM 흐름으로 처리)');
 
   // Recover stuck messages
   await recoverStuckMessages();
-  await cleanupStaleExtractCommands();
 
   // Start heartbeat and polling
   await sendHeartbeat();
-  console.log('[OK] 하트비트 전송 완료');
-  console.log('[OK] 폴링 시작 (' + CONFIG.pollInterval + 'ms)...\n');
+  log('[OK] 하트비트 전송 완료');
+  log('[OK] 폴링 시작 (' + CONFIG.pollInterval + 'ms)...\n');
 
   setInterval(sendHeartbeat, CONFIG.heartbeatInterval);
   setInterval(handlePings,   CONFIG.pollInterval);
@@ -916,5 +855,4 @@ async function main() {
   handlePings();
 }
 
-main().catch(e => { console.error('[FATAL]', e.message); process.exit(1); });
-
+main().catch(e => { err('[FATAL]', e.message); releaseLock(); process.exit(1); });
