@@ -1,13 +1,11 @@
 /**
- * Remote Bridge Relay Worker v31
+ * Remote Bridge Relay Worker v32
  * ======================================
- * Changes from v30:
- * - Supabase sys_log: all events logged → Claude can monitor & auto-fix
- * - Startup resilience: retries Supabase 5x instead of immediate exit
- * - Supabase keep-alive: pings every 6h to prevent free-tier project pause
- * - Graceful restart: handles 'relay-restart' command via Supabase
- * - Detailed error context: errors include stack + message_id for diagnosis
- * - DRM fix: pre-snapshot FED5 PIDs (from v30) maintained
+ * Changes from v31:
+ * - FIX: dbUpsert() 에 ?on_conflict=id 추가 → relay-heartbeat 갱신 정상화
+ * - FIX: runClaude() spawn timeout 버그 수정 → 수동 killTimer로 무한 hang 방지
+ * - FIX: sendHeartbeat() 실패 시 warn 로그 + sysLog 기록
+ * - All v31 features retained (sys_log, keepAlive, auto_debug, relay-restart)
  */
 const https    = require('https');
 const { spawn } = require('child_process');
@@ -20,7 +18,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v31';
+const VERSION   = 'v32';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
@@ -132,7 +130,7 @@ async function supaReq(method, path, body, extraHeaders, retryCount = 0) {
 function dbSelect(table, query) { return supaReq('GET', table + (query ? '?' + query : ''), null, null); }
 function dbInsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'return=minimal' }); }
 function dbUpdate(table, query, obj) { return supaReq('PATCH', table + '?' + query, obj, { 'Prefer': 'return=minimal' }); }
-function dbUpsert(table, obj)   { return supaReq('POST', table, obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
+function dbUpsert(table, obj)   { return supaReq('POST', table + '?on_conflict=id', obj, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }); }
 function dbDelete(table, query) { return supaReq('DELETE', table + '?' + query, null, null); }
 
 // ── sys_log: fire-and-forget Supabase logging ─────────────────────────────────
@@ -206,7 +204,7 @@ async function sendHeartbeat() {
       id: 'relay-heartbeat', action: 'heartbeat', target: 'relay',
       content: isProcessing ? 'busy' : 'idle', status: 'completed', result: tsVal,
     });
-  } catch (e) { /* silent */ }
+  } catch (e) { warn('[Heartbeat] upsert 실패:', e.message.slice(0, 120)); sysLog('warn', 'heartbeat_fail', { err: e.message.slice(0, 200) }); }
 }
 
 // ── Check if Bridge (company PC) is online ────────────────────────────────────
@@ -394,26 +392,40 @@ function runClaude(prompt) {
     const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
     log('[Claude] 실행:', cmd.slice(0, 80));
     const proc = spawn(cmd, [], {
-      timeout: CONFIG.claudeTimeout,
-      shell:   true,
-      env:     process.env,
+      shell: true,
+      env:   process.env,
     });
-    let out = '', errText = '';
+    let out = '', errText = '', settled = false;
+    function done(fn) { if (!settled) { settled = true; clearTimeout(killTimer); fn(); } }
+
+    // spawn()은 timeout 옵션을 무시함 — 수동으로 kill 타이머 구현
+    const killTimer = setTimeout(() => {
+      try { proc.kill('SIGTERM'); } catch(e2) {}
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e2) {}
+        reject(new Error('Claude CLI timeout (' + CONFIG.claudeTimeout/1000 + 's) — 응답 없음'));
+      });
+    }, CONFIG.claudeTimeout);
+
     proc.stdout.on('data', d => { out += d.toString(); });
     proc.stderr.on('data', d => { errText += d.toString(); });
     proc.on('close', code => {
-      try { fs.unlinkSync(tmpFile); } catch(e) {}
-      if (code === 0 && out.trim()) {
-        resolve(out.trim());
-      } else if (code === 0 && !out.trim()) {
-        reject(new Error('claude 응답 없음. stderr: ' + errText.slice(0, 200)));
-      } else {
-        reject(new Error('claude 종료코드 ' + code + ': ' + (errText || out).slice(0, 300)));
-      }
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e) {}
+        if (code === 0 && out.trim()) {
+          resolve(out.trim());
+        } else if (code === 0 && !out.trim()) {
+          reject(new Error('claude 응답 없음. stderr: ' + errText.slice(0, 200)));
+        } else {
+          reject(new Error('claude 종료코드 ' + code + ': ' + (errText || out).slice(0, 300)));
+        }
+      });
     });
     proc.on('error', e => {
-      try { fs.unlinkSync(tmpFile); } catch(e2) {}
-      reject(new Error('Claude 실행 실패: ' + e.message));
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e2) {}
+        reject(new Error('Claude 실행 실패: ' + e.message));
+      });
     });
   });
 }
@@ -922,7 +934,7 @@ async function main() {
   console.log('║  PID:      ' + String(process.pid).padEnd(38) + '║');
   console.log('╚══════════════════════════════════════════════════╝\n');
 
-  // Dheck Claude CLI
+  // Check Claude CLI
   try {
     const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true }).toString().trim();
     log('[OK] Claude CLI:', ver);
