@@ -734,7 +734,7 @@ body {
     <div class="messages" id="msgContainer" style="display:none"></div>
   </div>
 
-  <!-- Typing-indicator -->
+  <!-- Typing indicator -->
   <div class="typing-wrap" id="typingWrap">
     <div class="typing-dots"><span></span><span></span><span></span></div>
     <span>Claude가 응답 중...</span>
@@ -787,7 +787,7 @@ body {
         <div class="proj-ico">🏢</div>
         <div>
           <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v31</div>
+          <div class="proj-sub">Remote Bridge v33</div>
         </div>
       </div>
     </div>
@@ -884,7 +884,7 @@ async function sp(table, data) {
 }
 async function bridgeExec(action, content, timeout = 30000) {
   const id = 'cmd-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
-  await sp('commands', { id, action, target: '', content: content, status: 'pending' });
+  await sp('commands', { id, action, target: '', content, status: 'pending' });
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 1500));
@@ -999,7 +999,7 @@ async function extractPptxText(file) {
       const xml = await zip.files[sf].async('text');
       const num = sf.match(/slide(\d+)/)[1];
       text += '=== Slide ' + num + ' ===\n';
-      const paras = xml.match(/<a:p\b[^>]*>[\s\S]*?<\/a:p>/g) || [];
+      const paras = xml.match(/<a:p\b[^?]*>[\s\S]*?<\/a:p>/g) || [];
       for (const para of paras) {
         const runs = para.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/g) || [];
         const line = runs.map(t => t.replace(/<[^>]+>/g,'')).join('').trim();
@@ -1127,7 +1127,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
 
       // Cleanup stale pending drm commands (browser JS to Supabase - always works)
       try {
-        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
+        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bear%r ' + SUPA_KEY, 'Prefer': 'return=minimal' };
         await fetch(SUPA_URL + '/rest/v1/commands?id=like.drm-%25&status=eq.pending', { method: 'DELETE', headers: _hd });
       } catch(_e) {}
 
@@ -1189,7 +1189,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
       }
       if (resultStr.startsWith('SERVING:')) {
         const srvPort = resultStr.replace('SERVING:', '').trim();
-        toast('📥 DRM 해쀜 파일 수신 중... (localhost:' + srvPort + ')');
+        toast('📥 DRM 해제 파일 수신 중... (localhost:' + srvPort + ')');
 
         let b64 = null;
         for (let attempt = 0; attempt < 12; attempt++) {
@@ -1217,9 +1217,9 @@ async function triggerDrmDeprotect(msgId, fileName) {
         for (let ci = 0; ci < totalChunks; ci++) {
           const up = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
             method: 'POST', headers: hu,
-            body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chunkSize, (ci + 1) * chunkSize) })
+            body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chuonkSize, (ci + 1) * chunkSize) })
           });
-          if (!up.ok) return { ok: false, err: '청크 업로드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
+          if (!up.ok) return { ok: false, err: '청크 업ꡜ드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
         }
         return { ok: true };
       }
@@ -1232,7 +1232,7 @@ async function sendMessage() {
   const text = inp.value.trim();
   if (!text && !attachments.length) return;
   if (!chatId) return;
-  if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
+  if (!relayOnline) { toast('禴레이가 오프라일을 첨부하세요'); return; }
 
   const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
@@ -1242,16 +1242,16 @@ async function sendMessage() {
   const textExtracted = attachments.filter(a => a.type === 'text-extracted');
   let extractedContent = '';
   for (const att of textExtracted) {
-    extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
+    extractedContent += '\n\n=== 첨불파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
   }
-  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent,
+  appendMsg({ id: msgId, role:'user', content: (text || '파일 분섑요 sent') + extractedContent,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
     files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
 
-  const title = text.slice(0,30) + (text.length>30?'...':'') || '[m��일 첨부]';
+  const title = text.slice(0,30) + (text.length>30?'...':'') || '[파일 첨부]';
   upsertHistory(chatId, title);
   document.getElementById('chatTitle').textContent = title;
 
@@ -1289,7 +1289,7 @@ async function sendMessage() {
           const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
           const _cr = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
               method: 'POST',
-              headers: {
+              headers:{
                 'apikey': SUPA_KEY,
                 'Authorization': 'Bearer ' + SUPA_KEY,
                 'Content-Type': 'application/json',
@@ -1311,7 +1311,7 @@ async function sendMessage() {
         }
 
         fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
-        toast('업로드 완료: ' + att.name + ' (' + totalChunks + '청크)');
+        toast('업로드 완냌: ' + att.name + ' (' + totalChunks + '�l�-���)');
       } catch (e) {
         toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
         setWaiting(false);
@@ -1325,7 +1325,7 @@ async function sendMessage() {
       const attExt = '.' + att.name.split('.').pop().toLowerCase();
       if (drmExts.includes(attExt)) {
         toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
-        const drmResult = await triggerDrmDeprotect(msgId, att.name);
+        const drmResult = awa)t triggerDrmDeprotect(msgId, att.name);
         if (!drmResult.ok) {
           toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
           setWaiting(false);
@@ -1415,7 +1415,7 @@ function rmAttach(i) { attachments.splice(i,1); renderAttachRow(); }
 
 async function requestScreenshot() {
   if (!bridgeOnline) { toast('브릿지가 오프라인입니다'); return; }
-  toast('숤크린샷 캡처 중...');
+  toast('스크린샷 캡처 중...');
   const res = await bridgeExec('run_ps', `
     Add-Type -AssemblyName System.Windows.Forms
     $path = "$env:TEMP\\cw_ss_${Date.now()}.png"
@@ -1612,6 +1612,8 @@ async function pollMessages() {
     const msgs = await sgRaw('messages',
       `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at,attachments,files`);
     let hasNew = false;
+    // [v33] interim 메시지 필터링 (relay가 삭제 못 한 경우 대비)
+    msgs = msgs.filter(m => !m.id.startsWith('interim-'));
     msgs.forEach(m => {
       const ex = document.getElementById('m-'+m.id);
       if (ex) {
@@ -1641,7 +1643,14 @@ function setupRealtime() {
     .on('postgres_changes',
       { event:'*', schema:'public', table:'messages', filter:`chat_id=eq.${chatId}` },
       payload => {
+        // [v33] DELETE 이벤트: relay가 interim 메시지 삭제 시 DOM에서도 제거
+        if (payload.eventType === 'DELETE') {
+          const delId = payload.old && payload.old.id;
+          if (delId) { const el = document.getElementById('m-'+delId); if (el) el.remove(); }
+          return;
+        }
         const m = payload.new; if (!m) return;
+        // [v33] interim 메시지(pending 처리 중 표시)는 DOM에 추가하되 setWaiting 영향 없음
         const ex = document.getElementById('m-'+m.id);
         const parsed = parseContent(m.content||'');
         if (ex) { const mc=ex.querySelector('.mc'); if(mc) mc.textContent=parsed; updateProgress(m); }
@@ -1805,7 +1814,7 @@ async function runWatchdog(origMsgId, cid) {
 
   if (relayAgoSec > 90) {
     // relay 오프라인
-    appendSystemMsg(cid, `⚠️ **릴레이 응답 없음** (마지막 응답: ${relayAgoSec}초 전)\n\n**해결 방법:**\n1. 홈 PC에서 relay-worker-v31.js 실행 중인지 확인\n2. 터미널에서: \`node relay-worker-v31.js\`\n3. 또는 자동 재시작: \`bash relay-start.sh\``);
+    appendSystemMsg(cid, `⚠️ **릴레이 응답 없음** (마지막 응답: ${relayAgoSec}초 전)\n\n**해결 방법:**\n1. 홈 PC에서 relay-worker.js 실행 중인지 확인\n2. C:\\CoworkRelay\\start-relay.bat 실행\n3. 또는 CMD에서: \`node C:\\CoworkRelay\\relay-worker.js\``);
     debugInProgress = false;
     setWaiting(false);
     return;
@@ -1922,10 +1931,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { loadHistory(); } catch(e) { console.error('loadHistory:', e); }
   try { createNewChat(); } catch(e) { console.error('createNewChat:', e); }
   // Status checks are independent — always run even if init fails
-  setInterval(checkRelay,     15000);
-  setInterval(checkBridge,    30000);
+  setInterval(checkRelay,          15000);
+  setInterval(checkBridge,         30000);
+  setInterval(refreshSysLog,       60000);  // sys_log auto-refresh every 60s
   setInterval(sendBridgeHeartbeat, 20000);  // Bridge → Supabase 하트비트 (relay가 bridge 온라인 감지용)
-  setInterval(refreshSysLog,  60000);  // sys_log auto-refresh every 60s
   await Promise.all([checkRelay(), checkBridge(), sendBridgeHeartbeat()]);
   setTimeout(refreshSysLog, 3000);  // initial sys_log load after 3s
 });
@@ -1969,3 +1978,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 </script>
 </body>
 </html>
+
+ Claude is active in this tab group  
