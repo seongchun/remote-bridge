@@ -839,7 +839,7 @@ let chatId      = null;
 let relayOnline = false;
 let bridgeOnline= false;
 let waiting     = false;
-let pollTomer   = null;
+let pollTimer   = null;
 let rtChannel   = null;
 let attachments = [];
 let chatHistory = [];   // [{id, title, updated}]
@@ -1647,139 +1647,145 @@ async function checkRelay() {
 }
 async function checkBridge() {
   try {
-    const rows = await sgRaw('commands', 'id=eq.bridge-heartbeat&select=result');
+    const rows = await sgRaw('commands', 'id=eq.bridge-heartbeat&select=result,content');
     if (rows.length && rows[0].result) {
       const ago = Math.floor((Date.now()-new Date(rows[0].result).getTime())/1000);
-      if (ago < 120) { bridgeOnline=true; setStatus('Bridge','on','온라인'); return; }
-    }
-    bridgeOnline=false; setStatus('Bridge','wait','대기 중');
-  } catch { bridgeOnline=false; setStatus('Bridge','off','연결 오류'); }
+12unt -
+  if (!brid=cted ==false; setBrget: ''Rela�� 중':'온니다'); retu    }
+  
+  if (!brid=yOnline=false; setBrget: ''rows ''대�일 처 초과');
+  } 
+  if (!brid=yOnline=false; setBrget: ''Relay','off','연결 오류e); }
 }
 
-function setStatus(which, state, label) {
-  // Sidebar dots
-  const dot = document.getElementById('dot'+which);
-  const lbl = document.getElementById('lbl'+which);
-  if (dot) dot.className = 'dot '+state;
-  if (lbl) lbl.textContent = which==='Relay' ? '릴레이 ('+label+')' : '브릿지 ('+label+')';
-  // Right panel connector dots
-  const cd  = document.getElementById('connDot'+which);
-  const cl  = document.getElementById('connLbl'+which);
-  if (cd)   cd.className = 'conn-dot '+state;
-  if (cl)   cl.textContent = label;
+funclse; sewhichsContee,   b
+  if (!
+
+  idebar hink '📄';
+ oonst list = document.getEleme oo'+whichFileSec');
+ b const el = document.getEleme b '+whichFileS;
+   o&&  o&v');
+  d.class oon'+onteeileS;
+   b )
+ b ed) { mc.textCowhichm.stStatus= isUtoast('� ('+  b
+ +vPorlse,toast('� ('+  b
+ +vPo; (!
+
+ Rclicpar  rtec'nquery hink '📄';
+cdonst sec  = document.getElemeec'nDoo'+whichFileSec');
+clonst sec  = document.getElemeec'nLb '+whichFileS;
+  cd(p.eciv');
+  d.classec'n- oon'+onteeileS;
+  cl(p.ec ed) { mc.textCo  b
+ scribe();
 }
 
-/* ════════════════════════════════════════
-   UTILITIES
+/* ══════════════════════════════════════�UTILITIE PROGRESS
 ════════════════════════════════════════ */
-function scrollBot() {
-  const w = document.getElementById('messagesWrap');
-  w.scrollTop = w.scrollHeight;
+f        scrle(path) {
+wconst ex = document.getElementable:'Wrap� 초�w.      To;
+  w.      $screejoin('');
 }
-function setWaiting(on) {
-  waiting = on;
-  document.getElementById('typingWrap').classList.toggle('show', on);
-  document.getElementById('sendBtn').disabled = on;
+frror')) setonrle(paw')) se
+  on⚠️'};
+  document.getElemetyp seWrap� v');
+ ('rp.toggle('unctcomonr⚠️'};
+  document.getElemeunctepCancdisblicd
+  on�in('');
 }
-function lightbox(src) {
-  document.getElementById('lightboxImg').src = src;
-  document.getElementById('lightbox').classList.add('show');
+fnclick="ls.Op active) {
+  document.getElemenclick="ImgpFil  "$tl  ⚠️'};
+  document.getElemenclick="� v');
+ ('rp.aeadeunctc)join('');
 }
-function setupInput() {
-  const inp = document.getElementById('msgInput');
-  inp.addEventListener('keydown', e => {
-      if (e.key==='Enter' && !e.shiftKey && !e.isComposing) {
-        e.preventDefault();
-        sendMessage();
+frroupndleFiMessage() {
+  cost inp  = document.getElementById('msgInptle;ocument.addEventLikey_blar('porEach(f => {
+  e. = @.stE{ clssist!e.shift  "$ist!e.isncodes Outgo < 90) {
+{
+      e.preventDefault() function sendMw = true;
       }
-    });
-    inp.addEventListener('input', autoResize);
+    }le;ocument.addEventLi}
+  }r('p = ''; au)join('');
 }
-function autoResize() {
-  const inp = document.getElementById('msgInput');
-  inp.style.height = 'auto';
-  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+fe = ''; autoessage() {
+  cost inp  = document.getElementById('msgInptle;;
+  sepx;linlasse = 'gInptle;;
+  sepx;linlas    cmin(tle;;     $scree,
+12unt+ 'px'join('');
 }
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+fth)} of iteve;
+   caleTims.conte*/u,'').r&/g,'&amp;nte*/u,'').r</g,'&lt;nte*/u,'').r>/g,'&gt;nte*/u,'').r"/g,'&quot;ntjoin('');
 }
-function toast(msg, dur=3000) {
-  const el = document.getElementById('toast');
-  el.textContent = msg; el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), dur);
-}
-
-async function downloadAttachment(msgId, fileName) {
-  toast('📥 다운로드 중...');
-  try {
-    const chunks = await sgRaw('file_chunks',
-      `message_id=eq.${msgId}&file_name=eq.${encodeURIComponent(fileName)}&order=chunk_index.asc`);
-    if (!chunks.length) { toast('❌ 파일 데이터 없음'); return; }
-    const b64 = chunks.map(c => c.data).join('');
-    const bin = atob(b64);
-    const arr = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-    const blob = new Blob([arr]);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = fileName;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast('✅ 다운로드: ' + fileName);
-  } catch(e) { toast('❌ 실패: ' + e.message); }
-}
-
-/* ════════════════════════════════════════
-   INIT
-════════════════════════════════════════ */
-document.addEventListener('DOMContentLoaded', async () => {
-  setupInput();
-  loadHistory();
-  createNewChat();
-  await Promise.all([checkRelay(), checkBridge()]);
-  setInterval(checkRelay,  15000);
-  setInterval(checkBridge, 30000);
-});
-
-/* Chrome extension overlay gap fix (v30 - no feedback loop) */
-(function fixExtensionGap() {
-  /* 1. Inject CSS to permanently hide extension overlays - no JS polling needed */
-  var s = document.createElement('style');
-  s.id = 'ext-gap-fix-css';
-  s.textContent = '[id*="claude-agent"],[id*="claude-glow"]{display:none!important;width:0!important;height:0!important;position:fixed!important;}';
-  document.head.appendChild(s);
-
-  /* 2. One-time layout fix + resize handler (NO MutationObserver, NO setInterval) */
-  var lastW = 0;
-  function fixLayout() {
-    var rp   = document.querySelector('.right-panel');
-    var main = document.querySelector('.chat-main');
-    var sb   = document.querySelector('.sidebar');
-    if (!rp || !main || !sb) return;
-    var w = window.innerWidth - sb.offsetWidth - rp.offsetWidth;
-    if (w > 200 && Math.abs(w - lastW) > 2) {
-      lastW = w;
-      main.style.cssText = 'flex: 0 0 ' + w + 'px !important; min-width: 0 !important;';
-    }
-  }
-
-  /* Apply after DOM ready (slight delay for layout to settle) */
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() { setTimeout(fixLayout, 100); });
-  } else {
-    setTimeout(fixLayout, 100);
-  }
-
-  /* Re-apply only on window resize */
-  var resizeTimer;
-  window.addEventListener('resize', function() {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(fixLayout, 150);
+f else ntB, dur=eout(Status() {
+  const el = document.getElemenelse' esc(msgd) { mc.textContB;us';
+    ('rp.aeadeunctc)jo ise(r => setnload s';
+    ('rp.> { diveunctc), dur)e);
   });
-})();
-</script>
-</body>
-</html>
+}
 
- Claude is active in this tab group  
+async fnclick="downloadAttprotect(msgId, fileNa        toas 파일 다� 캡처 중.e() {
+  try {
+  ct totalC rows = awaitrest/v1/file_ssages',_chunks?messagta-miq.${Id) + '&file_${=eq.' + encodeURIComponent(f}.'+$qF+'&order=chunk_i`=result,con!v1/fil p.steps. } else { toam() || '��('�터e 응답�니다'); retu         nst bv1/fil ce(-coad cmid,tv>`;
+  }).jotu         innnerHobath..jotu        arst readeUint8Arrche in p.stepsjotu  */
+
+    for (let i = in p.stepd.lengtars[i]hunkin /plae.StAt(i.jotu         l  '$ceadeBl  ([ars].jotu        u "$suURLdocumenp = Neread l  .jotu        a const d = document.createEa).jotu  a.ad-b cou "; a.nclick="  safeFn = jotu  >';
+    document.body.appea); a.me)}"dMw = tr>';
+    documenel) sb.appea); = trURLd   oknp = Nereadu "); = tr        toa 파일 다� 실�msgId, fileN    }
+  } cat else { toas전송 실패: ' + e.m(0,80)); }
+}
+
+/* ══════════════════════════════════════�INITPROGRESS
+══════════════════════════════════════� }); }
+
+document.addEventLiDOM mc.texLk="-extr });
+}(, reject)null;
+rroupndleFiM;
+    }
+  } catch(e) { consolerroupndleFor('poll:'t)null;
+ck="  upsertM;
+    }
+  } catch(e) { consoleck="  upseror('poll:'t)null;
+ocumenNewChaFiM;
+    }
+  } catch(e) { consoleocumenNewChaFor('poll:'t)
+
+   + _cr resultare r=ch.bodtextT PAabase -run
+    t,coincr =ailso ise(){ clearIunction ch, h))
+  `, 15se(){ clearIunctiBrget:imeout `, 15 rows urn new.all([unction chec,function checkFile( }
+ ); Chrn e
+  censnc f) sryle.gap�mx (v30GET onfeed sty
+ckopB col('');
+}
+
+funxE censnc Ge(- if (!
+* 1. In= NewCSrowsepermaURIClyfunct
+  censnc f) srylesGET onJSfunct se
+needcd
+columvar s const d = document.createE;
+  sc)jo is;
+    eype=gap-unx-csingStaspBadge').textCon[id*="
+  ude-+ ent"],[id*="
+  ude-glow"]{c.style:play!im실�ant;wscre:0!im실�ant;px;lin:0!im실�ant;des mdId,$lisd!im실�ant;} = 'none';
+  d    ent.body.appes)ice(2,6)2. Oneass="o  y se�mx �패:ize:unctio
+
+ NO Mup.PresObPS HTTP NO se(){ clear)
+columvar leteWr (le
+);
+}
+
+    f�mxL y se(tgo < 90var rp onst sec  = dt mc=ex.querySelr;lin-ar  r).jotu  var mainnne sec  = dt mc=ex.querySelid=e-main).jotu  var sb onst sec  = dt mc=ex.querySelsidebart=result,con!rp || !mainn|| !sb; if (!m) retuvar wconwSystele';
+ $screGETsb.offrrorscreGETrp.offrrorscreresult,conw >slic$ist    cabsnw - leteW) >sltgo < 90) leteWr (ww = truemain;;
+  secsiT constsplay: 0 0 실�wt+ 'px !im실�ant;-dig-wscre: 0 !im실�ant;== 'bustch(e)e(2,6)ct Wy af cl DOM = awy (snclic dn ch */
+
+  y se�wserrot availabl;
+   oec  = d= awy$comJoconteck="s: 'tgo < 90 }); }
+
+document.addEventLiDOM mc.texLk="-extr
+}
+
+    (tgoise(r => set�mxL y se,lengt;   }
+  ;
+      } elsse(r => set�mxL y se,lengt;ch(e)e(2,6)Re-+t Wy onWy onnwSyste패:ize:columvar ��:izer); p초�wSystelocument.addEventLi��:izextr
+}
+
+    (tgootu   imerr => setT�:izer); ptrim() }):izer); p"$tle(r => set�mxL y se,le5gt;ch(eile( dMw </st-Job> </ocum> </html>)e(C  ude isActive?oin set.publ  = 'm  
