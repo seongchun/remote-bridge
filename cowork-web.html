@@ -1689,6 +1689,19 @@ async function checkBridge() {
   } catch { bridgeOnline=false; setStatus('Bridge','off','연결 오류'); }
 }
 
+/* Bridge → Supabase 하트비트 전송 (relay가 Bridge 온라인 여부를 판단하는 데 사용) */
+async function sendBridgeHeartbeat() {
+  try {
+    const tsVal = new Date().toISOString();
+    const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
+    await fetch(SUPA_URL + '/rest/v1/commands?on_conflict=id', {
+      method: 'POST', headers: _hd,
+      body: JSON.stringify({ id: 'bridge-heartbeat', action: 'heartbeat', target: 'bridge', content: 'online', status: 'completed', result: tsVal }),
+    });
+    if (!bridgeOnline) { bridgeOnline=true; setStatus('Bridge','on','온라인'); }
+  } catch(e) { /* silent — network 일시 오류 무시 */ }
+}
+
 let _supabaseWarnShown = false;
 function showSupabasePausedWarning() {
   if (_supabaseWarnShown) return;
@@ -1911,8 +1924,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Status checks are independent — always run even if init fails
   setInterval(checkRelay,     15000);
   setInterval(checkBridge,    30000);
+  setInterval(sendBridgeHeartbeat, 20000);  // Bridge → Supabase 하트비트 (relay가 bridge 온라인 감지용)
   setInterval(refreshSysLog,  60000);  // sys_log auto-refresh every 60s
-  await Promise.all([checkRelay(), checkBridge()]);
+  await Promise.all([checkRelay(), checkBridge(), sendBridgeHeartbeat()]);
   setTimeout(refreshSysLog, 3000);  // initial sys_log load after 3s
 });
 
