@@ -1938,7 +1938,7 @@ function toast(msg, dur=3000) {
   setTimeout(() => el.classList.remove('show'), dur);
 }
 
-acync function downloadAttachment(msgId, fileName) {
+async function downloadAttachment(msgId, fileName) {
   toast('📥 다운로드 중...');
   try {
     const chunks = await sgRaw('file_chunks',
