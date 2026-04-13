@@ -1,15 +1,16 @@
 /**
- * Remote Bridge Relay Worker v33
+ * Remote Bridge Relay Worker v35
  * ======================================
- * 변경사항 (v32 → v33):
- * - [NEW] extractViaOfficeXML(): PowerShell Expand-Archive로 PPTX/DOCX/XLSX 텍스트 추출 (Python 불필요)
- * - [NEW] watchdogRecovery(): 60초마다 processing > 3분 메시지를 pending으로 자동 복구
- * - [NEW] 처리 시작 즉시 "🔄 처리 중..." 임시 메시지 → 사용자 침묵 없음
- * - [NEW] tryAutoInstallMarkitdown(): markitdown 미설치 시 자동 pip install 시도
- * - [FIX] 오류 메시지 저장 5회 재시도 → 반드시 사용자에게 응답 전달
- * - [FIX] supaReq 재시도 3회 → 5회, 지수 백오프 최대 30초
- * - [FIX] extractFileContent Method 0 = Office XML (우선순위 최상위)
- * - [FIX] recoverStuckMessages → startup + 60초 주기 양쪽 실행
+ * 변경사항 (v33 → v35):
+ * - [SYNC] cowork-web.html과 버전 통일 (v35)
+ * - [FIX] 회사 PC DRM STEP 1.5 제거와 동기화 — relay가 원본 Office 파일 직접 처리
+ * - [NEW] 처리 시작 즉시 heartbeat 1회 강제 전송 → 브라우저가 빠르게 감지
+ *
+ * v33 기능 유지:
+ * - extractViaOfficeXML(): PowerShell Expand-Archive로 Office 텍스트 추출
+ * - watchdogRecovery(): 60초마다 processing > 3분 메시지 자동 복구
+ * - 즉시 "🔄 처리 중..." 임시 메시지
+ * - 오류 메시지 5회 재시도, supaReq 5회 재시도
  */
 'use strict';
 const https    = require('https');
@@ -23,7 +24,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v33';
+const VERSION   = 'v35';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
