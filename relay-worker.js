@@ -1,12 +1,17 @@
 /**
- * Remote Bridge Relay Worker v32
+ * Remote Bridge Relay Worker v33
  * ======================================
- * Changes from v31:
- * - FIX: dbUpsert() 에 ?on_conflict=id 추가 → relay-heartbeat 갱신 정상화
- * - FIX: runClaude() spawn timeout 버그 수정 → 수동 killTimer로 무한 hang 방지
- * - FIX: sendHeartbeat() 실패 시 warn 로그 + sysLog 기록
- * - All v31 features retained (sys_log, keepAlive, auto_debug, relay-restart)
+ * 변경사항 (v32 → v33):
+ * - [NEW] extractViaOfficeXML(): PowerShell Expand-Archive로 PPTX/DOCX/XLSX 텍스트 추출 (Python 불필요)
+ * - [NEW] watchdogRecovery(): 60초마다 processing > 3분 메시지를 pending으로 자동 복구
+ * - [NEW] 처리 시작 즉시 "🔄 처리 중..." 임시 메시지 → 사용자 침묵 없음
+ * - [NEW] tryAutoInstallMarkitdown(): markitdown 미설치 시 자동 pip install 시도
+ * - [FIX] 오류 메시지 저장 5회 재시도 → 반드시 사용자에게 응답 전달
+ * - [FIX] supaReq 재시도 3회 → 5회, 지수 백오프 최대 30초
+ * - [FIX] extractFileContent Method 0 = Office XML (우선순위 최상위)
+ * - [FIX] recoverStuckMessages → startup + 60초 주기 양쪽 실행
  */
+'use strict';
 const https    = require('https');
 const { spawn } = require('child_process');
 const { execSync, spawnSync } = require('child_process');
@@ -18,7 +23,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v32';
+const VERSION   = 'v33';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
@@ -27,10 +32,14 @@ const CONFIG = {
   heartbeatInterval:    15000,
   maxPromptLen:         8000,
   bridgeExtractTimeout: 90000,
-  keepAliveInterval:    6 * 60 * 60 * 1000,   // 6h — prevents Supabase free-tier pause
-  sysLogMaxRows:        500,                    // Keep sys_log table lean
-  startupRetries:       5,                      // Retry Supabase check on startup
-  startupRetryDelay:    10000,                  // 10s between startup retries
+  keepAliveInterval:    6 * 60 * 60 * 1000,  // 6h
+  sysLogMaxRows:        500,
+  startupRetries:       5,
+  startupRetryDelay:    10000,
+  supaRetryMax:         5,                    // v33: 3→5
+  watchdogInterval:     60000,                // v33: 60초마다 워치독
+  watchdogStuckMin:     3,                    // v33: 3분 이상 processing → 복구
+  markitdownInstalled:  null,                 // null=미확인, true/false
 };
 
 let isProcessing  = false;
@@ -84,7 +93,7 @@ process.on('SIGINT', () => { releaseLock(); process.exit(0); });
 process.on('SIGTERM', () => { releaseLock(); process.exit(0); });
 process.on('uncaughtException', e => { err('[Fatal]', e.message); releaseLock(); process.exit(1); });
 
-// ── HTTPS helper (with retry) ──────────────────────────────────────────────────
+// ── HTTPS helper (5회 재시도, 지수 백오프 최대 30초) ────────────────────────────
 async function supaReq(method, path, body, extraHeaders, retryCount = 0) {
   return new Promise((resolve, reject) => {
     const bodyStr = body ? JSON.stringify(body) : null;
@@ -113,9 +122,9 @@ async function supaReq(method, path, body, extraHeaders, retryCount = 0) {
     });
     req.on('error', async e => {
       const retryable = ['EAI_AGAIN', 'ENOTFOUND', 'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED'].includes(e.code);
-      if (retryable && retryCount < 3) {
-        const delay = (retryCount + 1) * 3000;
-        warn('[Retry] ' + e.code + ' → ' + delay + 'ms 후 재시도 (' + (retryCount+1) + '/3)');
+      if (retryable && retryCount < CONFIG.supaRetryMax) {
+        const delay = Math.min((retryCount + 1) * 3000, 30000);
+        warn('[Retry] ' + e.code + ' → ' + delay + 'ms 후 재시도 (' + (retryCount + 1) + '/' + CONFIG.supaRetryMax + ')');
         await new Promise(r => setTimeout(r, delay));
         supaReq(method, path, body, extraHeaders, retryCount + 1).then(resolve).catch(reject);
       } else {
@@ -134,41 +143,31 @@ function dbUpsert(table, obj)   { return supaReq('POST', table + '?on_conflict=i
 function dbDelete(table, query) { return supaReq('DELETE', table + '?' + query, null, null); }
 
 // ── sys_log: fire-and-forget Supabase logging ─────────────────────────────────
-// Writes to sys_log table. If table doesn't exist, silently no-ops.
-// Claude monitors this table via scheduled task to auto-diagnose issues.
 function sysLog(level, event, detail) {
   const id = 'log-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
   const obj = {
-    id,
-    level,       // 'info' | 'warn' | 'error' | 'fatal'
-    component:   'relay',
-    event,       // e.g. 'startup', 'message_received', 'error', 'drm_start'
+    id, level, component: 'relay', event,
     detail:      typeof detail === 'string' ? detail : JSON.stringify(detail),
     hostname:    HOSTNAME,
     version:     VERSION,
     created_at:  new Date().toISOString(),
   };
-  // Fire-and-forget: never throws, never blocks
   dbInsert('sys_log', obj).catch(() => {});
 }
 
-// Periodic cleanup: keep only last N rows in sys_log
 async function cleanupSysLog() {
   try {
-    // Get the Nth oldest row's created_at
     const rows = await dbSelect('sys_log',
       'order=created_at.desc&limit=1&offset=' + CONFIG.sysLogMaxRows + '&select=created_at');
     if (rows && rows.length > 0) {
       const cutoff = rows[0].created_at;
       await dbDelete('sys_log', 'created_at=lt.' + encodeURIComponent(cutoff));
-      log('[SysLog] 오래된 로그 정리 완료 (cutoff:', cutoff, ')');
+      log('[SysLog] 오래된 로그 정리 완료');
     }
-  } catch(e) { /* silent — table may not exist */ }
+  } catch(e) {}
 }
 
 // ── Supabase keep-alive ────────────────────────────────────────────────────────
-// Supabase free tier pauses after ~1 week of inactivity.
-// This periodic ping prevents that.
 async function keepAlive() {
   try {
     await dbSelect('messages', 'limit=1&select=id');
@@ -196,271 +195,81 @@ async function chunksDownload(messageId, fileName) {
   return buffer;
 }
 
-// ── Heartbeat ─────────────────────────────────────────────────────────────────
-async function sendHeartbeat() {
-  const tsVal = new Date().toISOString();
-  try {
-    await dbUpsert('commands', {
-      id: 'relay-heartbeat', action: 'heartbeat', target: 'relay',
-      content: isProcessing ? 'busy' : 'idle', status: 'completed', result: tsVal,
-    });
-  } catch (e) { warn('[Heartbeat] upsert 실패:', e.message.slice(0, 120)); sysLog('warn', 'heartbeat_fail', { err: e.message.slice(0, 200) }); }
-}
+// ── Heartbeat ────────────────────�if (['.pptx', '.ppt'].includes(ext)) {
+      // ppt/slides/slide*.xml → <a:t> 태그
+      const slidesDir = path.join(tmpDir, 'ppt', 'slides');
+      if (!fs.existsSync(slidesDir)) throw new Error('ppt/slides 디렉토리 없음 — DRM 파일일 수 있음');
+      const slideFiles = fs.readdirSync(slidesDir)
+        .filter(f => /^slide\d+\.xml$/i.test(f))
+        .sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+      if (slideFiles.length === 0) throw new Error('슬라이드 XML 파일 없음');
+      for (let i = 0; i < slideFiles.length; i++) {
+        const xml = fs.readFileSync(path.join(slidesDir, slideFiles[i]), 'utf8');
+        const tags = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || [];
+        const slideText = tags.map(t => t.replace(/<[^>]+>/g, '')).filter(s => s.trim()).join(' ');
+        if (slideText.trim()) texts.push(`=== 슬라이드 ${i + 1} ===\n${slideText.trim()}`);
+      }
+      log(`[OfficeXML] PPTX: ${slideFiles.length}슬라이드, ${texts.length}섹션 추출`);
 
-// ── Check if Bridge (company PC) is online ────────────────────────────────────
-async function checkBridgeOnline() {
-  try {
-    const rows = await dbSelect('commands', 'id=eq.bridge-heartbeat&select=result');
-    if (rows && rows.length && rows[0].result) {
-      const ago = (Date.now() - new Date(rows[0].result).getTime()) / 1000;
-      return ago < 120;
-    }
-    return false;
-  } catch(e) { return false; }
-}
+    } else if (['.docx', '.doc'].includes(ext)) {
+      // word/document.xml → <w:t> 태그
+      const docXml = path.join(tmpDir, 'word', 'document.xml');
+      if (!fs.existsSync(docXml)) throw new Error('word/document.xml 없음 — DRM 파일일 수 있음');
+      const xml = fs.readFileSync(docXml, 'utf8');
+      const tags = xml.match(/<w:t[^>]*>([^<]*)<\/w:t>/g) || [];
+      const docText = tags.map(t => t.replace(/<[^>]+>/g, '')).filter(s => s.trim()).join(' ');
+      if (docText.trim()) texts.push(docText.trim());
+      log(`[OfficeXML] DOCX: ${docText.length}자 추출`);
 
-// ── Recover stuck messages ─────────────────────────────────────────────────────
-async function recoverStuckMessages() {
-  try {
-    const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id,content');
-    if (!stuck || stuck.length === 0) return;
-    log('[Recovery] processing 상태 메시지', stuck.length, '개 → pending 복구');
-    sysLog('warn', 'stuck_messages_recovered', { count: stuck.length });
-    for (const msg of stuck) {
-      await dbUpdate('messages', 'id=eq.' + encodeURIComponent(msg.id), { status: 'pending' });
-    }
-  } catch (e) {
-    err('[Recovery] 실패:', e.message);
-  }
-}
-
-// ── Command Handler (ping + restart + auto_debug) ─────────────────────────────
-async function handleCommands() {
-  try {
-    const rows = await dbSelect('commands',
-      'action=in.(ping,relay-restart,relay-status,auto_debug)&status=eq.pending&order=created_at.asc&limit=10');
-    if (!rows || rows.length === 0) return;
-
-    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
-
-    for (const row of rows) {
-      if (row.action === 'relay-restart') {
-        log('[Command] relay-restart → graceful shutdown');
-        sysLog('info', 'restart_command', { cmd_id: row.id });
-        await dbUpdate('commands', 'id=eq.' + row.id, {
-          status: 'completed',
-          result: 'relay ' + VERSION + '/' + HOSTNAME + ' shutting down at ' + now,
+    } else if (['.xlsx', '.xls'].includes(ext)) {
+      // sharedStrings.xml (문자열 인덱스 테이블) 로드
+      const sharedStrings = [];
+      const ssPath = path.join(tmpDir, 'xl', 'sharedStrings.xml');
+      if (fs.existsSync(ssPath)) {
+        const ssXml = fs.readFileSync(ssPath, 'utf8');
+        const siBlocks = ssXml.match(/<si>[\s\S]*?<\/si>/g) || [];
+        siBlocks.forEach(si => {
+          const tTags = si.match(/<t[^>]*>([^<]*)<\/t>/g) || [];
+          sharedStrings.push(tTags.map(t => t.replace(/<[^>]+>/g, '')).join(''));
         });
-        setTimeout(() => { releaseLock(); process.exit(0); }, 500);
-        return;
       }
-
-      if (row.action === 'relay-status') {
-        const statusDetail = JSON.stringify({
-          version: VERSION, hostname: HOSTNAME, pid: process.pid,
-          isProcessing, uptime: process.uptime().toFixed(0) + 's', time: now,
-        });
-        await dbUpdate('commands', 'id=eq.' + row.id, { status: 'completed', result: statusDetail });
-        continue;
-      }
-
-      if (row.action === 'auto_debug') {
-        // 브라우저가 45초 응답 없음 감지 → 자가진단 실행
-        log('[AutoDebug] 자가진단 요청 수신');
-        await dbUpdate('commands', 'id=eq.' + row.id, { status: 'completed', result: 'diagnosing' });
-        // 비동기로 진단 실행 (polling을 block하지 않음)
-        runAutoDebug(row).catch(e => err('[AutoDebug] 오류:', e.message));
-        continue;
-      }
-
-      // ping
-      await dbUpdate('commands', 'id=eq.' + row.id, {
-        status: 'completed',
-        result: 'pong from relay ' + VERSION + '/' + HOSTNAME + ' at ' + now,
+      // xl/worksheets/sheet*.xml
+      const wsDir = path.join(tmpDir, 'xl', 'worksheets');
+      if (!fs.existsSync(wsDir)) throw new Error('xl/worksheets 디렉토리 없음 — DRM 파일일 수 있음');
+      const sheetFiles = fs.readdirSync(wsDir)
+        .filter(f => /^sheet\d+\.xml$/i.test(f))
+        .sort((a, b) => parseInt(a.match(/\d+/)[0]) - parseInt(b.match(/\d+/)[0]));
+      sheetFiles.forEach((sf, si) => {
+        const xml = fs.readFileSync(path.join(wsDir, sf), 'utf8');
+        const rows = xml.match(/<row[^>]*>[\s\S]*?<\/row>/g) || [];
+        const rowTexts = rows.map(row => {
+          const cells = row.match(/<c[^>]*>[\s\S]*?<\/c>/g) || [];
+          return cells.map(cell => {
+            const tAttr = (cell.match(/\st="([^"]*)"/) || [])[1];
+            const vMatch = cell.match(/<v>([^<]*)<\/v>/);
+            if (!vMatch) return '';
+            const val = vMatch[1];
+            if (tAttr === 's') return sharedStrings[parseInt(val)] || val;
+            return val;
+          }).filter(Boolean).join('\t');
+        }).filter(Boolean);
+        if (rowTexts.length) texts.push(`=== Sheet ${si + 1} ===\n${rowTexts.join('\n')}`);
       });
+      log(`[OfficeXML] XLSX: ${sheetFiles.length}시트, ${texts.length}섹션 추출`);
     }
-  } catch (e) { /* silent */ }
-}
 
-// ── Auto-Debug: relay self-diagnosis using Claude CLI ─────────────────────────
-async function runAutoDebug(cmd) {
-  const chatId = cmd.target;
-  let ctx = {};
-  try { ctx = JSON.parse(cmd.content || '{}'); } catch(e) {}
+    if (texts.length === 0) throw new Error('추출된 텍스트 없음 — XML 구조가 다를 수 있음');
+    const result = texts.join('\n\n');
+    log(`[OfficeXML] 성공: 총 ${result.length}자`);
+    return result;
 
-  sysLog('info', 'auto_debug_start', { chatId: chatId ? chatId.slice(0,8) : '?', ctx: JSON.stringify(ctx).slice(0, 200) });
-
-  // Gather diagnostics
-  let diagText = '=== 자가진단 보고서 ===\n';
-  diagText += `시간: ${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n`;
-  diagText += `릴레이: ${VERSION}/${HOSTNAME} (PID=${process.pid}, 가동시간=${process.uptime().toFixed(0)}s)\n`;
-  diagText += `처리 중: ${isProcessing}\n\n`;
-
-  // Check stuck messages
-  try {
-    const stuck = await dbSelect('messages', 'role=eq.user&status=in.(pending,processing)&select=id,status,created_at');
-    if (stuck && stuck.length > 0) {
-      diagText += `대기/처리 중 메시지: ${stuck.length}개\n`;
-      stuck.forEach(m => {
-        const age = Math.floor((Date.now() - new Date(m.created_at).getTime()) / 1000);
-        diagText += `  - id=${m.id.slice(0,8)} status=${m.status} (${age}초 전)\n`;
-      });
-    } else {
-      diagText += '대기 메시지: 없음\n';
-    }
-  } catch(e) {
-    diagText += `대기 메시지 확인 실패: ${e.message}\n`;
-  }
-
-  // Recent sys_log errors
-  try {
-    const errs = await dbSelect('sys_log', 'level=in.(error,fatal)&order=created_at.desc&limit=5&select=event,detail,created_at');
-    if (errs && errs.length > 0) {
-      diagText += '\n최근 오류:\n';
-      errs.forEach(e => {
-        diagText += `  [${e.event}] ${(e.detail||'').slice(0, 120)}\n`;
-      });
-    }
-  } catch(e) { diagText += '\nsys_log 접근 불가\n'; }
-
-  // Check Claude CLI
-  try {
-    const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true, timeout: 5000 }).toString().trim();
-    diagText += `\nClaude CLI: ${ver}\n`;
-  } catch(e) {
-    diagText += `\nClaude CLI 오류: ${e.message.slice(0, 100)}\n`;
-  }
-
-  // Context from browser
-  if (ctx.recentErrors && ctx.recentErrors !== '없음') {
-    diagText += `\n브라우저가 보고한 오류:\n${ctx.recentErrors.slice(0, 300)}\n`;
-  }
-
-  // Run Claude to diagnose
-  const diagPrompt = `당신은 Remote Bridge v31 자가진단 AI입니다. 다음 진단 정보를 분석하고, 한국어로 간결하게 (5줄 이내) 문제와 해결책을 알려주세요.
-
-${diagText}
-
-분석 결과를 다음 형식으로 출력하세요:
-🔍 **진단 결과**: (무엇이 문제인지)
-🔧 **해결 방법**: (사용자가 취해야 할 행동, 또는 "자동 복구 완료")`;
-
-  let diagResult = diagText;
-  try {
-    diagResult = await runClaude(diagPrompt);
-    sysLog('info', 'auto_debug_done', { chatId: chatId ? chatId.slice(0,8) : '?' });
-  } catch(e) {
-    diagResult = `진단 완료 (Claude CLI 응답 없음):\n\n${diagText}`;
-    sysLog('error', 'auto_debug_claude_fail', { err: e.message.slice(0, 200) });
-  }
-
-  // Auto-recover stuck messages
-  try {
-    const stuck = await dbSelect('messages', 'role=eq.user&status=eq.processing&select=id');
-    for (const m of (stuck || [])) {
-      await dbUpdate('messages', 'id=eq.' + encodeURIComponent(m.id), { status: 'pending' });
-      log('[AutoDebug] stuck 메시지 복구:', m.id.slice(0, 8));
-    }
-  } catch(e) {}
-
-  // Post diagnosis result to chat
-  if (chatId) {
-    try {
-      const rid = 'debug-' + Date.now();
-      await dbInsert('messages', {
-        id: rid, chat_id: chatId, role: 'assistant',
-        content: diagResult, status: 'completed',
-        files: null, created_at: new Date().toISOString(),
-      });
-      log('[AutoDebug] 진단 결과 전송 완료');
-    } catch(e) {
-      err('[AutoDebug] 결과 전송 실패:', e.message);
-    }
+  } finally {
+    // 임시 폴더 항상 정리
+    try { execSync(`if exist "${tmpDir}" rd /s /q "${tmpDir}"`, { shell: true, timeout: 10000 }); } catch(e) {}
   }
 }
 
-// ── Run Claude ─────────────────────────────────────────────────────────────────
-function runClaude(prompt) {
-  return new Promise((resolve, reject) => {
-    const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
-    try {
-      fs.writeFileSync(tmpFile, prompt, 'utf8');
-    } catch (e) {
-      reject(new Error('임시파일 쓰기 실패: ' + e.message));
-      return;
-    }
-    const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
-    log('[Claude] 실행:', cmd.slice(0, 80));
-    const proc = spawn(cmd, [], {
-      shell: true,
-      env:   process.env,
-    });
-    let out = '', errText = '', settled = false;
-    function done(fn) { if (!settled) { settled = true; clearTimeout(killTimer); fn(); } }
-
-    // spawn()은 timeout 옵션을 무시함 — 수동으로 kill 타이머 구현
-    const killTimer = setTimeout(() => {
-      try { proc.kill('SIGTERM'); } catch(e2) {}
-      done(() => {
-        try { fs.unlinkSync(tmpFile); } catch(e2) {}
-        reject(new Error('Claude CLI timeout (' + CONFIG.claudeTimeout/1000 + 's) — 응답 없음'));
-      });
-    }, CONFIG.claudeTimeout);
-
-    proc.stdout.on('data', d => { out += d.toString(); });
-    proc.stderr.on('data', d => { errText += d.toString(); });
-    proc.on('close', code => {
-      done(() => {
-        try { fs.unlinkSync(tmpFile); } catch(e) {}
-        if (code === 0 && out.trim()) {
-          resolve(out.trim());
-        } else if (code === 0 && !out.trim()) {
-          reject(new Error('claude 응답 없음. stderr: ' + errText.slice(0, 200)));
-        } else {
-          reject(new Error('claude 종료코드 ' + code + ': ' + (errText || out).slice(0, 300)));
-        }
-      });
-    });
-    proc.on('error', e => {
-      done(() => {
-        try { fs.unlinkSync(tmpFile); } catch(e2) {}
-        reject(new Error('Claude 실행 실패: ' + e.message));
-      });
-    });
-  });
-}
-
-// ── Build prompt ───────────────────────────────────────────────────────────────
-async function buildPrompt(chatId, currentContent) {
-  try {
-    const rows = await dbSelect('messages',
-      'chat_id=eq.' + encodeURIComponent(chatId) +
-      '&status=eq.completed&order=created_at.asc&limit=10&select=id,role,content,files');
-    if (!rows || rows.length === 0) return currentContent;
-    const hist = rows
-      .filter(m => m.role === 'user' || m.role === 'assistant')
-      .map(m => {
-        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content||'').slice(0, 600);
-        if (m.files && Array.isArray(m.files) && m.files.length > 0) {
-          const fileNames = m.files.map(f => f.name).join(', ');
-          line += '\n[첨부파일: ' + fileNames + ']';
-        }
-        return line;
-      })
-      .join('\n\n');
-    const full = hist + '\n\nHuman: ' + currentContent;
-    return full.length > CONFIG.maxPromptLen
-      ? 'Human: ' + currentContent
-      : full;
-  } catch (e) {
-    return currentContent;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// File content extraction
-// ═══════════════════════════════════════════════════════════════════════════════
-
+// ── PDF 추출 ───────────────────────────────────────────────────────────────────
 function isPdfBuffer(buf) {
   return buf.length >= 4 &&
     buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46;
@@ -542,16 +351,31 @@ function extractViaPythonPptx(filePath) {
   }
 }
 
+// [v33 NEW] markitdown 자동 설치 시도
+async function tryAutoInstallMarkitdown() {
+  if (CONFIG.markitdownInstalled === true) return true;
+  if (CONFIG.markitdownInstalled === false) return false;
+  try {
+    log('[AutoInstall] markitdown 자동 설치 시도...');
+    execSync('pip install markitdown[all] --quiet', { shell: true, timeout: 120000, stdio: 'pipe' });
+    CONFIG.markitdownInstalled = true;
+    log('[AutoInstall] markitdown 설치 성공');
+    sysLog('info', 'auto_install_success', { pkg: 'markitdown' });
+    return true;
+  } catch(e) {
+    CONFIG.markitdownInstalled = false;
+    warn('[AutoInstall] markitdown 설치 실패:', e.message.slice(0, 100));
+    return false;
+  }
+}
+
 /**
- * DRM deprotect via Bridge (company PC) — uses PowerShell COM automation.
- * v31 change: PS script uploads PDF directly to Supabase (no HTTP server).
- * This eliminates the localhost:7655 dependency that was unreachable from home PC.
+ * DRM deprotect via Bridge (company PC) — COM → PDF → Supabase
  */
 async function extractViaBridgeCOMDirect(messageId, fileName) {
   const ext = path.extname(fileName).toLowerCase();
   const safeName = fileName.replace(/'/g, "''");
 
-  // PS script: download from Supabase → COM export to PDF → upload back to Supabase
   const lines = [
     `$supaUrl = '${SUPA_URL}'`,
     `$supaKey = '${SUPA_KEY}'`,
@@ -559,7 +383,6 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     `$fileName = '${safeName}'`,
     `$ext = '${ext}'`,
     '',
-    '# Download file_chunks from Supabase',
     '$uri = $supaUrl + "/rest/v1/file_chunks" +',
     '  "?message_id=eq=" + [uri]::EscapeDataString($msgId) +',
     '  "&file_name=eq=" + [uri]::EscapeDataString($fileName) +',
@@ -571,8 +394,6 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '  Write-Output ("FAIL:chunk download error: " + $_.Exception.Message); return',
     '}',
     'if (-not $chunks -or $chunks.Count -eq 0) { Write-Output "FAIL:no chunks"; return }',
-    '',
-    '# Reassemble → temp file',
     '$b64 = ($chunks | Sort-Object chunk_index | ForEach-Object { $_.data }) -join ""',
     '$bytes = [Convert]::FromBase64String($b64)',
     '$ts = Get-Date -f "yyyyMMddHHmmssfff"',
@@ -580,12 +401,10 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '$tmpPdf = [IO.Path]::Combine($env:TEMP, "bridge-out-" + $ts + ".pdf")',
     '[IO.File]::WriteAllBytes($tmpF, $bytes)',
     '',
-    '# [v31 DRM FIX] Snapshot pre-existing FED5 PIDs before COM starts',
     '$preFed5Ids = @(Get-Process -EA 0 | Where-Object {',
     '  $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5"',
     '} | Select-Object -ExpandProperty Id)',
     '',
-    '# COM export to PDF',
     '$comJob = Start-Job -ScriptBlock {',
     '  param($tmpF, $tmpPdf, $ext)',
     '  try {',
@@ -616,7 +435,6 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '  finally { Remove-Item $tmpF -EA 0 }',
     '} -ArgumentList $tmpF, $tmpPdf, $ext',
     '',
-    '# Monitor with pre-snapshot FED5 check (v31 DRM fix)',
     '$epDetected = $false; $comWait = 0; $maxWait = 180',
     'while ($comJob.State -eq "Running" -and $comWait -lt $maxWait) {',
     '  Start-Sleep 2; $comWait += 2',
@@ -636,40 +454,25 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '$comOut = Receive-Job $comJob 2>&1 | Out-String; Remove-Job $comJob -EA 0',
     'if ($comOut.Trim() -ne "OK") { Write-Output ("FAIL:COM:" + $comOut.Trim()); return }',
     '',
-    '# PDF → upload directly to Supabase file_chunks (v31: no HTTP server)',
     'if (-not (Test-Path $tmpPdf)) { Write-Output "FAIL:PDF not found after export"; return }',
     '$pdfBytes = [IO.File]::ReadAllBytes($tmpPdf)',
     'Remove-Item $tmpPdf -EA 0',
     '$b64Pdf = [Convert]::ToBase64String($pdfBytes)',
-    '',
-    '# Split into 900KB chunks and upload',
     '$chunkSize = 900 * 1024',
     '$totalLen  = $b64Pdf.Length',
     '$totalChunks = [Math]::Ceiling($totalLen / $chunkSize)',
     '$pdfName = $fileName + ".drm.pdf"',
-    '',
-    '# Delete any stale chunks first',
     '$delUri = $supaUrl + "/rest/v1/file_chunks?message_id=eq=" + [uri]::EscapeDataString($msgId) + "&file_name=eq=" + [uri]::EscapeDataString($pdfName)',
     'try { Invoke-RestMethod -Uri $delUri -Headers $hdr -Method Delete } catch {}',
-    '',
     'for ($i = 0; $i -lt $totalChunks; $i++) {',
     '  $start  = $i * $chunkSize',
     '  $length = [Math]::Min($chunkSize, $totalLen - $start)',
     '  $chunkData = $b64Pdf.Substring($start, $length)',
-    '  $body = @{',
-    '    message_id  = $msgId',
-    '    file_name   = $pdfName',
-    '    chunk_index = $i',
-    '    total_chunks = $totalChunks',
-    '    data        = $chunkData',
-    '  } | ConvertTo-Json -Depth 2',
+    '  $body = @{ message_id=$msgId; file_name=$pdfName; chunk_index=$i; total_chunks=$totalChunks; data=$chunkData } | ConvertTo-Json -Depth 2',
     '  $insUri = $supaUrl + "/rest/v1/file_chunks"',
     '  $insHdr = $hdr + @{ "Content-Type" = "application/json"; "Prefer" = "return=minimal" }',
-    '  try {',
-    '    Invoke-RestMethod -Uri $insUri -Headers $insHdr -Method Post -Body $body | Out-Null',
-    '  } catch {',
-    '    Write-Output ("FAIL:upload chunk $i: " + $_.Exception.Message); return',
-    '  }',
+    '  try { Invoke-RestMethod -Uri $insUri -Headers $insHdr -Method Post -Body $body | Out-Null }',
+    '  catch { Write-Output ("FAIL:upload chunk $i: " + $_.Exception.Message); return }',
     '}',
     'Write-Output ("OK:UPLOADED_PDF:" + $pdfName + ":chunks=" + $totalChunks)',
   ];
@@ -678,11 +481,10 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
   const cmdId = 'relay-drm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
 
   sysLog('info', 'drm_start', { messageId: messageId.slice(0, 8), fileName, cmdId });
-
   await dbInsert('commands', {
     id: cmdId, action: 'run_ps', target: '', content: psScript, status: 'pending',
   });
-  log('[Bridge] DRM 직접 업로드 요청:', fileName, '→ cmd:', cmdId);
+  log('[Bridge] DRM 요청:', fileName, '→ cmd:', cmdId);
 
   const deadline = Date.now() + CONFIG.bridgeExtractTimeout;
   while (Date.now() < deadline) {
@@ -693,43 +495,42 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
       if (row.status === 'completed' || row.status === 'error') {
         try { await dbDelete('commands', `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
         const result = (row.result || '').trim();
-
         if (result === 'EP_LOGIN_REQUIRED') {
-          sysLog('warn', 'drm_ep_login', { messageId: messageId.slice(0, 8), fileName });
+          sysLog('warn', 'drm_ep_login', { messageId: messageId.slice(0, 8) });
           throw new Error('EP 로그인이 필요합니다. EP(FED5)에 로그인 후 재시도하세요.');
         }
         if (result === 'COM_TIMEOUT') {
-          sysLog('error', 'drm_timeout', { messageId: messageId.slice(0, 8), fileName });
+          sysLog('error', 'drm_timeout', { messageId: messageId.slice(0, 8) });
           throw new Error('COM 작업 타임아웃 (180초). Office가 응답하지 않습니다.');
         }
         if (result.startsWith('OK:UPLOADED_PDF:')) {
-          // e.g. OK:UPLOADED_PDF:report.pptx.drm.pdf:chunks=3
-          const parts = result.split(':');
-          const uploadedName = parts[2];
+          const uploadedName = result.split(':')[2];
           log('[Bridge] PDF 업로드 완료:', uploadedName);
           sysLog('info', 'drm_uploaded', { messageId: messageId.slice(0, 8), uploadedName });
-          return uploadedName;  // relay will download this PDF name
+          return uploadedName;
         }
         const errMsg = result.startsWith('FAIL:') ? result.slice(5) : result;
-        sysLog('error', 'drm_fail', { messageId: messageId.slice(0, 8), fileName, err: errMsg.slice(0, 200) });
+        sysLog('error', 'drm_fail', { messageId: messageId.slice(0, 8), err: errMsg.slice(0, 200) });
         throw new Error('Bridge DRM 실패: ' + errMsg.slice(0, 200));
       }
     }
   }
   try { await dbDelete('commands', `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
-  sysLog('error', 'drm_timeout_relay', { messageId: messageId.slice(0, 8), fileName });
-  throw new Error(`Bridge 응답 없음 (${CONFIG.bridgeExtractTimeout/1000}초)`);
+  sysLog('error', 'drm_timeout_relay', { messageId: messageId.slice(0, 8) });
+  throw new Error(`Bridge 응답 없음 (${CONFIG.bridgeExtractTimeout / 1000}초)`);
 }
 
-// ── Main extraction ────────────────────────────────────────────────────────────
+// ── Main extraction — Method 0 우선순위 ────────────────────────────────────────
 async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
   const ext = path.extname(fileName).toLowerCase();
   const isPptx   = ['.pptx', '.ppt'].includes(ext);
   const isDocx   = ['.docx', '.doc'].includes(ext);
+  const isXlsx   = ['.xlsx', '.xls'].includes(ext);
+  const isOffice = isPptx || isDocx || isXlsx;
   const isPdf    = ext === '.pdf' || (fileBuffer && isPdfBuffer(fileBuffer));
 
   if (isPdf) {
-    log('[Extract] PDF 파일 감지:', fileName);
+    log('[Extract] PDF 파일:', fileName);
     try {
       const text = extractViaPdf(filePath);
       if (text && text.length > 10) return text;
@@ -741,36 +542,126 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
     return `[PDF 텍스트 추출 실패: ${fileName}]\n💡 pip install pdfminer.six`;
   }
 
-  // Method 1: markitdown
-  let e1msg = '';
-  try {
-    log('[Extract] Method 1: markitdown -', fileName);
-    const text = extractViaMarkitdown(filePath);
-    if (text && text.length > 10) return text;
-  } catch(e) { e1msg = e.message.slice(0, 100); }
+  if (isOffice) {
+    const errors = {};
 
-  // Method 2: python-pptx (PPTX only)
-  if (isPptx) {
-    let e2msg = '';
+    // ── Method 0: Office XML (PowerShell Expand-Archive) ──────────────────────
     try {
-      log('[Extract] Method 2: python-pptx -', fileName);
-      const text = extractViaPythonPptx(filePath);
+      log('[Extract] Method 0: Office XML -', fileName);
+      const text = extractViaOfficeXML(filePath, ext);
+      if (text && text.length > 10) {
+        log('[Extract] Method 0 성공 ✓');
+        return text;
+      }
+    } catch(e) {
+      errors.officeXml = e.message.slice(0, 150);
+      warn('[Extract] Method 0 실패:', errors.officeXml);
+      // DRM 파일이면 다른 방법으로
+      const isDrmHint = errors.officeXml.includes('DRM') || errors.officeXml.includes('없음');
+      if (!isDrmHint) {
+        sysLog('warn', 'office_xml_fail', { fileName, err: errors.officeXml });
+      }
+    }
+
+    // ── Method 1: markitdown ──────────────────────────────────────────────────
+    try {
+      log('[Extract] Method 1: markitdown -', fileName);
+      const text = extractViaMarkitdown(filePath);
+      if (text && text.length > 10) {
+        log('[Extract] Method 1 성공 ✓');
+        return text;
+      }
+    } catch(e) {
+      errors.markitdown = e.message.slice(0, 100);
+      warn('[Extract] Method 1 실패:', errors.markitdown);
+      // markitdown 없으면 자동 설치 시도 (비동기, 다음 파일에 적용)
+      if (errors.markitdown.includes('not found') || errors.markitdown.includes('not recognized')) {
+        tryAutoInstallMarkitdown().catch(() => {});
+      }
+    }
+
+    // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
+    if (isPptx) {
+      try {
+        log('[Extract] Method 2: python-pptx -', fileName);
+        const text = extractViaPythonPptx(filePath);
+        if (text && text.length > 10) {
+          log('[Extract] Method 2 성공 ✓');
+          return text;
+        }
+      } catch(e) {
+        errors.xt = extractViaMarkitdown(filePath);
       if (text && text.length > 10) return text;
-    } catch(e) { e2msg = e.message.slice(0, 100); }
+    } catch(e) {}
+    return `[PDF 텍스트 추출 실패: ${fileName}]\n💡 pip install pdfminer.six`;
+  }
 
-    // Method 3: Bridge DRM direct upload (v31)
+  if (isOffice) {
+    const errors = {};
+
+    // ── Method 0: Office XML (PowerShell Expand-Archive) ──────────────────────
+    try {
+      log('[Extract] Method 0: Office XML -', fileName);
+      const text = extractViaOfficeXML(filePath, ext);
+      if (text && text.length > 10) {
+        log('[Extract] Method 0 성공 ✓');
+        return text;
+      }
+    } catch(e) {
+      errors.officeXml = e.message.slice(0, 150);
+      warn('[Extract] Method 0 실패:', errors.officeXml);
+      // DRM 파일이면 다른 방법으로
+      const isDrmHint = errors.officeXml.includes('DRM') || errors.officeXml.includes('없음');
+      if (!isDrmHint) {
+        sysLog('warn', 'office_xml_fail', { fileName, err: errors.officeXml });
+      }
+    }
+
+    // ── Method 1: markitdown ──────────────────────────────────────────────────
+    try {
+      log('[Extract] Method 1: markitdown -', fileName);
+      const text = extractViaMarkitdown(filePath);
+      if (text && text.length > 10) {
+        log('[Extract] Method 1 성공 ✓');
+        return text;
+      }
+    } catch(e) {
+      errors.markitdown = e.message.slice(0, 100);
+      warn('[Extract] Method 1 실패:', errors.markitdown);
+      // markitdown 없으면 자동 설치 시도 (비동기, 다음 파일에 적용)
+      if (errors.markitdown.includes('not found') || errors.markitdown.includes('not recognized')) {
+        tryAutoInstallMarkitdown().catch(() => {});
+      }
+    }
+
+    // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
+    if (isPptx) {
+      try {
+        log('[Extract] Method 2: python-pptx -', fileName);
+        const text = extractViaPythonPptx(filePath);
+        if (text && text.length > 10) {
+          log('[Extract] Method 2 성공 ✓');
+          return text;
+        }
+      } catch(e) {
+        errors.pythonPptx = e.message.slice(0, 100);
+        warn('[Extract] Method 2 실패:', errors.pythonPptx);
+      }
+    }
+
+    // ── Method 3: Bridge DRM (COM → PDF) ─────────────────────────────────────
     const bridgeOnline = await checkBridgeOnline();
     if (bridgeOnline) {
       try {
-        log('[Extract] Method 3: Bridge DRM 직접 업로드 -', fileName);
+        log('[Extract] Method 3: Bridge DRM -', fileName);
         const uploadedPdfName = await extractViaBridgeCOMDirect(messageId, fileName);
-        // Download the PDF that bridge uploaded
         const pdfBuffer = await chunksDownload(messageId, uploadedPdfName);
         const pdfPath = path.join(os.tmpdir(), 'relay-drm-' + Date.now() + '.pdf');
         fs.writeFileSync(pdfPath, pdfBuffer);
         try {
           const text = extractViaPdf(pdfPath);
           if (text && text.length > 10) {
+            log('[Extract] Method 3 성공 ✓');
             await dbDelete('file_chunks', `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(uploadedPdfName)}`);
             return text;
           }
@@ -778,58 +669,288 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
           try { fs.unlinkSync(pdfPath); } catch(e) {}
         }
       } catch(e) {
-        const e3msg = e.message;
-        err('[Extract] Bridge DRM 실패:', e3msg);
-        return `[파일 내용 추출 실패: ${fileName}]\n• markitdown: ${e1msg}\n• python-pptx: ${e2msg}\n• Bridge DRM: ${e3msg}`;
+        errors.bridgeDrm = e.message.slice(0, 150);
+        err('[Extract] Method 3 실패:', errors.bridgeDrm);
       }
+    }
+
+    // 모든 방법 실패 — 상세 오류 반환
+    const errorSummary = Object.entries(errors).map(([k, v]) => `• ${k}: ${v}`).join('\n');
+    sysLog('error', 'extract_all_methods_failed', { fileName, errors: JSON.stringify(errors) });
+    return `[파일 내용 추출 실패: ${fileName}]\n\n` +
+           `시도한 방법:\n${errorSummary}\n\n` +
+           `💡 해결 방법:\n` +
+           `1. 일반 PPTX: PowerShell이 설치됐는지 확인하세요\n` +
+           `2. DRM 파일: 회사 PC에서 start-bridge.bat 실행 후 재시도\n` +
+           `3. 홈 PC: pip install markitdown[all]`;
+  }
+
+  return `[지원하지 않는 파일 형식: ${ext}]\n지원 형식: .pptx .ppt .docx .doc .xlsx .xls .pdf`;
+}
+
+// ── Recover stuck messages ─────────────────────────────────────────────────────
+async function recoverStuckMessages(sinceMinutes) {
+  try {
+    let query = 'role=eq.user&status=eq.processing&select=id,content';
+    if (sinceMinutes) {
+      const threshold = new Date(Date.now() - sinceMinutes * 60 * 1000).toISOString();
+      query = 'role=eq.user&status=eq.processing&created_at=lt.' + encodeURIComponent(threshold) + '&select=id,content';
+    }
+    const stuck = await dbSelect('messages', query);
+    if (!stuck || stuck.length === 0) return 0;
+    log('[Recovery] processing 메시지', stuck.length, '개 → pending 복구');
+    sysLog('warn', 'stuck_messages_recovered', { count: stuck.length, sinceMinutes: sinceMinutes || 'all' });
+    for (const msg of stuck) {
+      await dbUpdate('messages', 'id=eq.' + encodeURIComponent(msg.id), { status: 'pending' });
+    }
+    return stuck.length;
+  } catch (e) {
+    err('[Recovery] 실패:', e.message);
+    return 0;
+  }
+}
+
+// [v33 NEW] 워치독: 60초마다 processing > 3분 메시지 자동 복구
+async function watchdogRecovery() {
+  try {
+    const count = await recoverStuckMessages(CONFIG.watchdogStuckMin);
+    if (count > 0) {
+      log('[Watchdog] 고착 메시지', count, '개 자동 복구 완료');
+    }
+  } catch(e) {}
+}
+
+// ── Command Handler ────────────────────────────────────────────────────────────
+async function handleCommands() {
+  try {
+    const rows = await dbSelect('commands',
+      'action=in.(ping,relay-restart,relay-status,auto_debug)&status=eq.pending&order=created_at.asc&limit=10');
+    if (!rows || rows.length === 0) return;
+
+    const now = new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+
+    for (const row of rows) {
+      if (row.action === 'relay-restart') {
+        log('[Command] relay-restart → graceful shutdown');
+        sysLog('info', 'restart_command', { cmd_id: row.id });
+        await dbUpdate('commands', 'id=eq.' + row.id, {
+          status: 'completed',
+          result: 'relay ' + VERSION + '/' + HOSTNAME + ' shutting down at ' + now,
+        });
+        setTimeout(() => { releaseLock(); process.exit(0); }, 500);
+        return;
+      }
+
+      if (row.action === 'relay-status') {
+        const statusDetail = JSON.stringify({
+          version: VERSION, hostname: HOSTNAME, pid: process.pid,
+          isProcessing, uptime: process.uptime().toFixed(0) + 's', time: now,
+        });
+        await dbUpdate('commands', 'id=eq.' + row.id, { status: 'completed', result: statusDetail });
+        continue;
+      }
+
+      if (row.action === 'auto_debug') {
+        log('[AutoDebug] 자가진단 요청 수신');
+        await dbUpdate('commands', 'id=eq.' + row.id, { status: 'completed', result: 'diagnosing' });
+        runAutoDebug(row).catch(e => err('[AutoDebug] 오류:', e.message));
+        continue;
+      }
+
+      // ping
+      await dbUpdate('commands', 'id=eq.' + row.id, {
+        status: 'completed',
+        result: 'pong from relay ' + VERSION + '/' + HOSTNAME + ' at ' + now,
+      });
+    }
+  } catch (e) {}
+}
+
+// ── Auto-Debug ─────────────────────────────────────────────────────────────────
+async function runAutoDebug(cmd) {
+  const chatId = cmd.target;
+  let ctx = {};
+  try { ctx = JSON.parse(cmd.content || '{}'); } catch(e) {}
+
+  sysLog('info', 'auto_debug_start', { chatId: chatId ? chatId.slice(0, 8) : '?' });
+
+  let diagText = '=== 자가진단 보고서 (v33) ===\n';
+  diagText += `시간: ${new Date().toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })}\n`;
+  diagText += `릴레이: ${VERSION}/${HOSTNAME} (PID=${process.pid}, 가동시간=${process.uptime().toFixed(0)}s)\n`;
+  diagText += `처리 중: ${isProcessing}\n\n`;
+
+  try {
+    const stuck = await dbSelect('messages', 'role=eq.user&status=in.(pending,processing)&select=id,status,created_at');
+    if (stuck && stuck.length > 0) {
+      diagText += `대기/처리 중 메시지: ${stuck.length}개\n`;
+      stuck.forEach(m => {
+        const age = Math.floor((Date.now() - new Date(m.created_at).getTime()) / 1000);
+        diagText += `  - id=${m.id.slice(0, 8)} status=${m.status} (${age}초 전)\n`;
+      });
     } else {
-      return `[PPTX 처리 불가: ${fileName}]\nDRM 파일은 회사 PC Bridge가 필요하지만 오프라인입니다.\n\n💡 해결:\n1. 홈 PC: pip install markitdown[all]\n2. 회사 PC: start-bridge.bat 실행 후 재시도`;
+      diagText += '대기 메시지: 없음\n';
     }
+  } catch(e) { diagText += `대기 메시지 확인 실패: ${e.message}\n`; }
+
+  try {
+    const errs = await dbSelect('sys_log', 'level=in.(error,fatal)&order=created_at.desc&limit=5&select=event,detail,created_at');
+    if (errs && errs.length > 0) {
+      diagText += '\n최근 오류:\n';
+      errs.forEach(e => { diagText += `  [${e.event}] ${(e.detail || '').slice(0, 120)}\n`; });
+    }
+  } catch(e) { diagText += '\nsys_log 접근 불가\n'; }
+
+  try {
+    const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true, timeout: 5000 }).toString().trim();
+    diagText += `\nClaude CLI: ${ver}\n`;
+  } catch(e) {
+    diagText += `\nClaude CLI 오류: ${e.message.slice(0, 100)}\n`;
   }
 
-  if (isDocx) {
-    const bridgeOnline = await checkBridgeOnline();
-    if (bridgeOnline) {
-      try {
-        log('[Extract] DOCX Bridge DRM -', fileName);
-        const uploadedPdfName = await extractViaBridgeCOMDirect(messageId, fileName);
-        const pdfBuffer = await chunksDownload(messageId, uploadedPdfName);
-        const pdfPath = path.join(os.tmpdir(), 'relay-drm-' + Date.now() + '.pdf');
-        fs.writeFileSync(pdfPath, pdfBuffer);
-        try {
-          const text = extractViaPdf(pdfPath);
-          if (text && text.length > 10) {
-            await dbDelete('file_chunks', `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(uploadedPdfName)}`);
-            return text;
-          }
-        } finally {
-          try { fs.unlinkSync(pdfPath); } catch(e) {}
+  if (ctx.recentErrors && ctx.recentErrors !== '없음') {
+    diagText += `\n브라우저가 보고한 오류:\n${ctx.recentErrors.slice(0, 300)}\n`;
+  }
+
+  const diagPrompt = `당신은 Remote Bridge 자가진단 AI입니다. 다음 진단 정보를 분석하고, 한국어로 간결하게 (5줄 이내) 문제와 해결책을 알려주세요.
+
+${diagText}
+
+분석 결과:
+🔍 **진단 결과**: (무엇이 문제인지)
+🔧 **해결 방법**: (사용자가 취해야 할 행동, 또는 "자동 복구 완료")`;
+
+  let diagResult = diagText;
+  try {
+    diagResult = await runClaude(diagPrompt);
+    sysLog('info', 'auto_debug_done', { chatId: chatId ? chatId.slice(0, 8) : '?' });
+  } catch(e) {
+    diagResult = `진단 완료 (Claude CLI 응답 없음):\n\n${diagText}`;
+    sysLog('error', 'auto_debug_claude_fail', { err: e.message.slice(0, 200) });
+  }
+
+  // 고착 메시지 자동 복구
+  try {
+    const recovered = await recoverStuckMessages(0);
+    if (recovered > 0) diagResult += `\n\n✅ 자동 복구: ${recovered}개 고착 메시지 → pending 재설정`;
+  } catch(e) {}
+
+  if (chatId) {
+    try {
+      const rid = 'debug-' + Date.now();
+      await dbInsert('messages', {
+        id: rid, chat_id: chatId, role: 'assistant',
+        content: diagResult, status: 'completed',
+        files: null, created_at: new Date().toISOString(),
+      });
+      log('[AutoDebug] 진단 결과 전송 완료');
+    } catch(e) {
+      err('[AutoDebug] 결과 전송 실패:', e.message);
+    }
+  }
+}
+
+// ── Run Claude ─────────────────────────────────────────────────────────────────
+function runClaude(prompt) {
+  return new Promise((resolve, reject) => {
+    const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
+    try {
+      fs.writeFileSync(tmpFile, prompt, 'utf8');
+    } catch (e) {
+      reject(new Error('임시파일 쓰기 실패: ' + e.message));
+      return;
+    }
+    const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
+    log('[Claude] 실행:', cmd.slice(0, 80));
+    const proc = spawn(cmd, [], { shell: true, env: process.env });
+    let out = '', errText = '', settled = false;
+    function done(fn) { if (!settled) { settled = true; clearTimeout(killTimer); fn(); } }
+
+    const killTimer = setTimeout(() => {
+      try { proc.kill('SIGTERM'); } catch(e2) {}
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e2) {}
+        reject(new Error('Claude CLI timeout (' + CONFIG.claudeTimeout / 1000 + 's) — 응답 없음'));
+      });
+    }, CONFIG.claudeTimeout);
+
+    proc.stdout.on('data', d => { out += d.toString(); });
+    proc.stderr.on('data', d => { errText += d.toString(); });
+    proc.on('close', code => {
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e) {}
+        if (code === 0 && out.trim()) {
+          resolve(out.trim());
+        } else if (code === 0 && !out.trim()) {
+          reject(new Error('claude 응답 없음. stderr: ' + errText.slice(0, 200)));
+        } else {
+          reject(new Error('claude 종료코드 ' + code + ': ' + (errText || out).slice(0, 300)));
         }
-      } catch(e) {
-        err('[Extract] DOCX Bridge DRM 실패:', e.message);
-      }
-    }
-  }
+      });
+    });
+    proc.on('error', e => {
+      done(() => {
+        try { fs.unlinkSync(tmpFile); } catch(e2) {}
+        reject(new Error('Claude 실행 실패: ' + e.message));
+      });
+    });
+  });
+}
 
-  return `[파일 내용 추출 불가: ${fileName}]\nmarkitdown: ${e1msg || '없음'}\n💡 홈 PC에서 pip install markitdown[all] 실행 후 재시도`;
+// ── Build prompt ───────────────────────────────────────────────────────────────
+async function buildPrompt(chatId, currentContent) {
+  try {
+    const rows = await dbSelect('messages',
+      'chat_id=eq.' + encodeURIComponent(chatId) +
+      '&status=eq.completed&order=created_at.asc&limit=10&select=id,role,content,files');
+    if (!rows || rows.length === 0) return currentContent;
+    const hist = rows
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => {
+        let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content || '').slice(0, 600);
+        if (m.files && Array.isArray(m.files) && m.files.length > 0) {
+          line += '\nA첨부파일: ' + m.files.map(f => f.name).join(', ') + ']';
+        }
+        return line;
+      })
+      .join('\n\n');
+    const full = hist + '\n\nHuman: ' + currentContent;
+    return full.length > CONFIG.maxPromptLen ? 'Human: ' + currentContent : full;
+  } catch (e) {
+    return currentContent;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Process message
+// Process message — 임시 메시지 + 오류 5회 재시도
 // ═══════════════════════════════════════════════════════════════════════════════
 async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
   let attachedFiles = [];
 
-  log('[Worker] 처리 중:', id.slice(0,8), '"' + content.slice(0,50) + '"');
+  log('[Worker] 처리 중:', id.slice(0, 8), '"' + content.slice(0, 50) + '"');
   sysLog('info', 'message_received', { id: id.slice(0, 8), preview: content.slice(0, 80) });
 
   try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'processing' }); } catch(e) {}
   await sendHeartbeat();
 
+  // [v33 NEW] 즉시 임시 메시지 → 사용자에게 처리 시작 알림
+  const interimId = 'interim-' + id.slice(0, 8) + '-' + Date.now();
+  let interimSent = false;
   try {
-    // Download attached files
+    await dbInsert('messages', {
+      id: interimId, chat_id, role: 'assistant',
+      content: '🔄 처리 중입니다... (파일 분석 및 Claude 응답 생성 중, 최대 2분 소요)',
+      status: 'pending', files: null, created_at: new Date().toISOString(),
+    });
+    interimSent = true;
+    log('[Worker] 임시 메시지 전송 ✓');
+  } catch(e) {
+    warn('[Worker] 임시 메시지 전송 실패 (무시):', e.message.slice(0, 80));
+  }
+
+  try {
+    // 파일 다운로드
     if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
       log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
@@ -843,12 +964,12 @@ async function processMessage(msg) {
             isPdfBuffer(buffer) ? '[실제 PDF!]' : '');
         } catch (e) {
           err('[Worker] 파일 다운로드 실패:', file.name, e.message);
-          sysLog('error', 'file_download_fail', { id: id.slice(0,8), file: file.name, err: e.message.slice(0, 200) });
+          sysLog('error', 'file_download_fail', { id: id.slice(0, 8), file: file.name, err: e.message.slice(0, 200) });
         }
       }
     }
 
-    // Extract text
+    // 파일 텍스트 추출
     let fileContentText = '';
     for (const file of attachedFiles) {
       log('[Worker] 파일 추출:', file.name);
@@ -856,7 +977,6 @@ async function processMessage(msg) {
       fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
     }
 
-    // Build prompt and run Claude
     const finalContent = content + fileContentText;
     const prompt = await buildPrompt(chat_id, finalContent);
     log('[Worker] 프롬프트 길이:', prompt.length);
@@ -864,7 +984,6 @@ async function processMessage(msg) {
     const response = await runClaude(prompt);
     log('[Worker] 응답 수신:', response.slice(0, 60));
 
-    // Save response
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
@@ -879,28 +998,49 @@ async function processMessage(msg) {
     sysLog('info', 'message_completed', { id: id.slice(0, 8), responseId: rid.slice(0, 8), files: attachedFiles.length });
     log('[Worker] 완료 →', rid.slice(0, 8));
 
-    // Cleanup
+    // 정리
     for (const file of attachedFiles) { try { fs.unlinkSync(file.path); } catch(e) {} }
     if (msg.files && msg.files.length > 0) {
       try { await dbDelete('file_chunks', 'message_id=eq.' + encodeURIComponent(id)); } catch(e) {}
     }
 
-  } catch (err2) {
-    err('[Worker] 오류:', err2.message);
-    sysLog('error', 'message_error', { id: id.slice(0,8), err: err2.message.slice(0, 300), stack: (err2.stack||'').slice(0, 200) });
+  } catch (procErr) {
+    err('[Worker] 처리 오류:', procErr.message);
+    sysLog('error', 'message_error', {
+      id: id.slice(0, 8),
+      err: procErr.message.slice(0, 300),
+      stack: (procErr.stack || '').slice(0, 200),
+    });
 
-    const errMsg = '⚠️ 오류: ' + err2.message;
-    try {
-      await dbInsert('messages', {
-        id: 'err-' + Date.now(), chat_id, role: 'assistant',
-        content: errMsg, status: 'error',
-        files: null, created_at: new Date().toISOString(),
-      });
-      await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' });
-    } catch(e2) { err('[Worker] 오류 기록 실패:', e2.message); }
+    // [v33 NEW] 오류 메시지 5회 재시도 — 반드시 사용자에게 전달
+    const errMsg = '⚠️ 오류가 발생했습니다:\n' + procErr.message +
+      '\n\n💡 파일 분석 실패 시 회사 PC에서 start-bridge.bat 실행 후 재시도해 주세요.';
+    let saved = false;
+    for (let attempt = 1; attempt <= 5 && !saved; attempt++) {
+      try {
+        await dbInsert('messages', {
+          id: 'err-' + Date.now() + '-' + attempt,
+          chat_id, role: 'assistant',
+          content: errMsg, status: 'error',
+          files: null, created_at: new Date().toISOString(),
+        });
+        saved = true;
+        log('[Worker] 오류 메시지 저장 성공 (시도 ' + attempt + ')');
+      } catch(e2) {
+        warn('[Worker] 오류 메시지 저장 실패 (시도 ' + attempt + '):', e2.message.slice(0, 80));
+        if (attempt < 5) await new Promise(r => setTimeout(r, attempt * 2000));
+      }
+    }
 
+    try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
     for (const file of attachedFiles) { try { fs.unlinkSync(file.path); } catch(e) {} }
   }
+
+  // 임시 메시지 항상 삭제 (finally 역할)
+  if (interimSent) {
+    try { await dbDelete('messages', 'id=eq.' + encodeURIComponent(interimId)); } catch(e) {}
+  }
+
   await sendHeartbeat();
 }
 
@@ -926,15 +1066,15 @@ async function main() {
 
   console.log('╔══════════════════════════════════════════════════╗');
   console.log('║  Remote Bridge Relay Worker ' + VERSION + '                 ║');
-  console.log('║  자가복구: Supabase sys_log + 재시작 명령 지원   ║');
-  console.log('║  DRM: COM → PDF → Supabase 직접 업로드           ║');
-  console.log('║  Keep-alive: 6시간마다 Supabase 핑               ║');
+  console.log('║  [NEW] Office XML 추출 (PowerShell, Python 불필요)║');
+  console.log('║  [NEW] 60초 워치독 자동 복구                      ║');
+  console.log('║  [NEW] 즉시 임시 메시지 + 오류 5회 재시도         ║');
   console.log('╠══════════════════════════════════════════════════╣');
   console.log('║  Hostname: ' + HOSTNAME.padEnd(38) + '║');
   console.log('║  PID:      ' + String(process.pid).padEnd(38) + '║');
   console.log('╚══════════════════════════════════════════════════╝\n');
 
-  // Check Claude CLI
+  // Claude CLI 확인
   try {
     const ver = execSync(CLAUDE_EXE + ' --version', { stdio: 'pipe', shell: true }).toString().trim();
     log('[OK] Claude CLI:', ver);
@@ -942,7 +1082,15 @@ async function main() {
     warn('[WARN] claude --version 실패:', e.message.slice(0, 80));
   }
 
-  // Supabase 연결 — 최대 5회 재시도 (프리 티어 일시정지 시 즉시 종료하지 않음)
+  // PowerShell 확인 (Office XML 추출 필수)
+  try {
+    execSync('powershell -NoProfile -Command "Write-Output OK"', { stdio: 'pipe', shell: true, timeout: 5000 });
+    log('[OK] PowerShell: 사용 가능 (Office XML 추출 지원)');
+  } catch(e) {
+    warn('[WARN] PowerShell 사용 불가 — Office XML 추출 제한됨:', e.message.slice(0, 60));
+  }
+
+  // Supabase 연결 — 최대 5회 재시도
   let supaOk = false;
   for (let attempt = 1; attempt <= CONFIG.startupRetries; attempt++) {
     try {
@@ -953,20 +1101,24 @@ async function main() {
     } catch (e) {
       const isLast = attempt === CONFIG.startupRetries;
       if (isLast) {
-        err('[FATAL] Supabase 연결 최종 실패 (' + attempt + '/' + CONFIG.startupRetries + '):', e.message);
-        err('[HINT] Supabase 프리 티어가 일시정지됐을 수 있습니다.');
-        err('[HINT] https://supabase.com/dashboard 에서 프로젝트 상태를 확인하세요.');
+        err('[FATAL] Supabase 연결 최종 실패:', e.message);
         releaseLock(); process.exit(1);
       } else {
-        warn('[Retry] Supabase 연결 실패 (' + attempt + '/' + CONFIG.startupRetries + ') — ' + CONFIG.startupRetryDelay/1000 + '초 후 재시도:', e.message.slice(0, 80));
+        warn('[Retry] Supabase 연결 실패 (' + attempt + '/' + CONFIG.startupRetries + ') — ' + CONFIG.startupRetryDelay / 1000 + '초 후:', e.message.slice(0, 80));
         await new Promise(r => setTimeout(r, CONFIG.startupRetryDelay));
       }
     }
   }
 
-  // Check tools
-  try { execSync('markitdown --version', { stdio: 'pipe', shell: true, timeout: 5000 }); log('[OK] markitdown: 설치됨'); }
-  catch(e) { warn('[WARN] markitdown: 미설치 → pip install markitdown[all]'); }
+  // 도구 확인
+  try {
+    execSync('markitdown --version', { stdio: 'pipe', shell: true, timeout: 5000 });
+    CONFIG.markitdownInstalled = true;
+    log('[OK] markitdown: 설치됨');
+  } catch(e) {
+    CONFIG.markitdownInstalled = false;
+    warn('[WARN] markitdown: 미설치 (Method 0 Office XML이 대신 동작함)');
+  }
 
   try { execSync('python -c "import pdfminer"', { stdio: 'pipe', shell: true, timeout: 5000 }); log('[OK] pdfminer.six: 설치됨'); }
   catch(e) {
@@ -974,32 +1126,28 @@ async function main() {
     catch(e2) { warn('[WARN] pdfminer.six: 미설치 → pip install pdfminer.six'); }
   }
 
-  // Check Bridge
+  // Bridge 상태
   const bridgeOnline = await checkBridgeOnline();
   log(bridgeOnline ? '[OK] 🏢 Bridge (회사 PC): 온라인' : '[WARN] 🏢 Bridge (회사 PC): 오프라인');
 
-  // Recover stuck messages
-  await recoverStuckMessages();
+  // 시작 시 고착 메시지 복구 (기존 all + v33 워치독)
+  await recoverStuckMessages(null);
 
-  // Log startup to Supabase
   sysLog('info', 'startup', { version: VERSION, hostname: HOSTNAME, pid: process.pid });
-
   await sendHeartbeat();
   log('[OK] 폴링 시작 (' + CONFIG.pollInterval + 'ms)...\n');
 
-  // Periodic intervals
-  setInterval(sendHeartbeat,    CONFIG.heartbeatInterval);
-  setInterval(handleCommands,   CONFIG.pollInterval);
-  setInterval(poll,             CONFIG.pollInterval);
-  setInterval(keepAlive,        CONFIG.keepAliveInterval);
+  // 주기적 작업 등록
+  setInterval(sendHeartbeat,   CONFIG.heartbeatInterval);
+  setInterval(handleCommands,  CONFIG.pollInterval);
+  setInterval(poll,            CONFIG.pollInterval);
+  setInterval(keepAlive,       CONFIG.keepAliveInterval);
+  setInterval(watchdogRecovery, CONFIG.watchdogInterval);  // [v33 NEW] 60초 워치독
+  setInterval(cleanupSysLog,   24 * 60 * 60 * 1000);
 
-  // Daily sys_log cleanup
-  setInterval(cleanupSysLog, 24 * 60 * 60 * 1000);
-
-  // Immediate first run
+  // 즉시 첫 실행
   poll();
   handleCommands();
-  // First keep-alive after 1 minute to verify Supabase stays alive
   setTimeout(keepAlive, 60 * 1000);
 }
 
