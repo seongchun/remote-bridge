@@ -1610,7 +1610,8 @@ function stopPolling(){ if(pollTimer){ clearInterval(pollTimer); pollTimer=null;
 async function pollMessages() {
   if (!chatId) return;
   try {
-    const msgs = await sgRaw('messages',
+    // [FIX] let으로 선언 — 아래에서 filter 재할당 필요 (const이면 TypeError)
+    let msgs = await sgRaw('messages',
       `chat_id=eq.${chatId}&order=created_at.asc&select=id,role,content,status,created_at,attachments,files`);
     let hasNew = false;
     // [v33] interim 메시지 필터링 (relay가 삭제 못 한 경우 대비)
