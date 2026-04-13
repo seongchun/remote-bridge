@@ -196,6 +196,48 @@ async function chunksDownload(messageId, fileName) {
 }
 
 // ── Heartbeat ────────────────────�if (['.pptx', '.ppt'].includes(ext)) {
+async function sendHeartbeat() {
+  const tsVal = new Date().toISOString();
+  try {
+    await dbUpsert('commands', {
+      id: 'relay-heartbeat', action: 'heartbeat', target: 'relay',
+      content: isProcessing ? 'busy' : 'idle', status: 'completed', result: tsVal,
+    });
+  } catch (e) {
+    warn('[Heartbeat] upsert 실패:', e.message.slice(0, 120));
+    sysLog('warn', 'heartbeat_fail', { err: e.message.slice(0, 200) });
+  }
+}
+
+// ── Check if Bridge (company PC) is online ────────────────────────────────────
+async function checkBridgeOnline() {
+  try {
+    const rows = await dbSelect('commands', 'id=eq.bridge-heartbeat&select=result');
+    if (rows && rows.length && rows[0].result) {
+      const ago = (Date.now() - new Date(rows[0].result).getTime()) / 1000;
+      return ago < 120;
+    }
+    return false;
+  } catch(e) { return false; }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// [v33 NEW] Office XML 추출 — PowerShell Expand-Archive (Python 불필요)
+// PPTX/DOCX/XLSX 파일은 ZIP 아카이브 → XML 파싱으로 텍스트 추출
+// ═══════════════════════════════════════════════════════════════════════════════
+function extractViaOfficeXML(filePath, ext) {
+  const tmpDir = path.join(os.tmpdir(), 'ofxml-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5));
+  try {
+    // PowerShell Expand-Archive는 Windows 5.1(PS v4+)부터 내장
+    const safeFile = filePath.replace(/'/g, "''");
+    const safeTmp  = tmpDir.replace(/'/g, "''");
+    execSync(
+      `powershell -NoProfile -Command "Expand-Archive -LiteralPath '${safeFile}' -DestinationPath '${safeTmp}' -Force"`,
+      { shell: true, timeout: 30000 }
+    );
+
+    const texts = [];
+
       // ppt/slides/slide*.xml → <a:t> 태그
       const slidesDir = path.join(tmpDir, 'ppt', 'slides');
       if (!fs.existsSync(slidesDir)) throw new Error('ppt/slides 디렉토리 없음 — DRM 파일일 수 있음');
