@@ -856,6 +856,7 @@ let chatIndex     = {};
 let watchdogTimer = null;     // 응답 없음 감지 타이머
 let watchdogMsgId = null;     // 현재 감시 중인 메시지 ID
 let debugInProgress = false;  // 자가진단 중 여부
+let _lastHeartbeatSentAt = 0; // [FIX] race condition 방지용 — sendBridgeHeartbeat 성공 시각
 
 /* ════════════════════════════════════════
    SUPABASE REST HELPERS
@@ -1688,6 +1689,8 @@ async function checkRelay() {
   }
 }
 async function checkBridge() {
+  // [FIX] 최근에 하트비트를 성공적으로 보냈으면 Supabase 읽기 생략 — stale-read race 방지
+  if (Date.now() - _lastHeartbeatSentAt < 20000 && bridgeOnline) return;
   try {
     const rows = await sgRaw('commands', 'id=eq.bridge-heartbeat&select=result');
     if (rows.length && rows[0].result) {
@@ -1703,11 +1706,16 @@ async function sendBridgeHeartbeat() {
   try {
     const tsVal = new Date().toISOString();
     const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
-    await fetch(SUPA_URL + '/rest/v1/commands?on_conflict=id', {
+    const resp = await fetch(SUPA_URL + '/rest/v1/commands?on_conflict=id', {
       method: 'POST', headers: _hd,
       body: JSON.stringify({ id: 'bridge-heartbeat', action: 'heartbeat', target: 'bridge', content: 'online', status: 'completed', result: tsVal }),
     });
-    if (!bridgeOnline) { bridgeOnline=true; setStatus('Bridge','on','온라인'); }
+    // [FIX] resp.ok 확인 후에만 상태 업데이트 — HTTP 오류 시 false positive 방지
+    if (resp.ok) {
+      _lastHeartbeatSentAt = Date.now();
+      bridgeOnline = true;
+      setStatus('Bridge', 'on', '온라인');
+    }
   } catch(e) { /* silent — network 일시 오류 무시 */ }
 }
 
@@ -1932,10 +1940,12 @@ document.addEventListener('DOMContentLoaded', async () => {
   try { createNewChat(); } catch(e) { console.error('createNewChat:', e); }
   // Status checks are independent — always run even if init fails
   setInterval(checkRelay,          15000);
-  setInterval(checkBridge,         30000);
+  setInterval(checkBridge,         20000);  // [FIX] 30s→20s: 더 빠른 상태 반영
   setInterval(refreshSysLog,       60000);  // sys_log auto-refresh every 60s
-  setInterval(sendBridgeHeartbeat, 20000);  // Bridge → Supabase 하트비트 (relay가 bridge 온라인 감지용)
-  await Promise.all([checkRelay(), checkBridge(), sendBridgeHeartbeat()]);
+  setInterval(sendBridgeHeartbeat, 15000);  // [FIX] 20s→15s: relay와 동일 주기, stale 방지
+  // [FIX] 하트비트 먼저 전송 후 체크 — 동시 실행 시 stale-read race condition 방지
+  await sendBridgeHeartbeat();
+  await Promise.all([checkRelay(), checkBridge()]);
   setTimeout(refreshSysLog, 3000);  // initial sys_log load after 3s
 });
 
