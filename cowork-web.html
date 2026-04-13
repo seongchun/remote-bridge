@@ -1016,7 +1016,7 @@ async function extractPptxText(file) {
 async function showEPLoginModal() {
   return new Promise((resolve) => {
     const div = document.createElement('div');
-    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">⚠️ EP 로그인 필요</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM 보호 파일을 열기 위해 회사 <b>EP(포스코)</b> 로그인이 필요합니다.</p><ol style="padding-left:18px;margin-top:8px"><li>회사 PC에서 EP에 로그인하세요</li><li>ECM 연결 상태가 <b>정상</b>인지 확인하세요</li><li>준비되면 아래 <b>계속 진행</b>을 클릭하세요</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px 16px;cursor:pointer;font-size:13px">취소</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">계속 진행</button></div></div></div>';
+    div.innerHTML = '<div id="epModalOv" style="position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9998;display:flex;align-items:center;justify-content:center"><div style="background:var(--bg1,#fff);border-radius:12px;padding:28px;max-width:440px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.2)"><div style="font-size:17px;font-weight:700;color:var(--orange,#d97706);margin-bottom:14px">⚠️ EP 로그인 필요</div><div style="font-size:13px;line-height:1.7;margin-bottom:20px"><p>DRM 보호 파일을 열기 위해 회사 <b>EP(포스코)</b> 로그인이 필요합니다.</p><ol style="padding-left:18px;margin-top:8px"><li>회사 PC에서 EP에 로그인하세요</li><li>ECM 연결 상태가 <b>정상</b>인지 확인하세요</li><li>준비되면 아래 <b>계속 진행</b>을 클릭하세요</li></ol></div><div style="display:flex;gap:8px;justify-content:flex-end"><button id="epCancelBtn" style="background:var(--bg3,#e5e7eb);color:var(--text1,#1a1a1a);border:none;border-radius:8px;padding:9px16px;cursor:pointer;font-size:13px"}����소</button><button id="epContBtn" style="background:var(--accent,#d97706);color:#fff;border:none;border-radius:8px;padding:9px 22px;cursor:pointer;font-size:13px;font-weight:600">계속 진행</button></div></div></div>';
     document.body.appendChild(div);
     const done = (v) => { div.remove(); resolve(v); };
     document.getElementById('epContBtn').onclick = () => done(true);
@@ -1078,7 +1078,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
         '# [FIX] Record pre-existing FED5 windows BEFORE COM starts (prevents false positives)',
         '$preFed5Ids = @(Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" } | Select-Object -ExpandProperty Id)',
         '# Monitor COM job: 3-min base timeout; if NEW FED5 dialog appears, extend 90s and keep job alive',
-        '$epDetected = $false; $comWait = 0; $maxWait = 180',
+        '$epDetected = $false; $comWait = 0; $maxWait = 181',
         'while ($comJob.State -eq "Running" -and $comWait -lt $maxWait) {',
         '  Start-Sleep 2; $comWait += 2',
         '  $newFed5 = Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" -and $preFed5Ids -notcontains $_.Id }',
@@ -1128,7 +1128,7 @@ async function triggerDrmDeprotect(msgId, fileName) {
 
       // Cleanup stale pending drm commands (browser JS to Supabase - always works)
       try {
-        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bear%r ' + SUPA_KEY, 'Prefer': 'return=minimal' };
+        const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
         await fetch(SUPA_URL + '/rest/v1/commands?id=like.drm-%25&status=eq.pending', { method: 'DELETE', headers: _hd });
       } catch(_e) {}
 
@@ -1218,9 +1218,9 @@ async function triggerDrmDeprotect(msgId, fileName) {
         for (let ci = 0; ci < totalChunks; ci++) {
           const up = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
             method: 'POST', headers: hu,
-            body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chuonkSize, (ci + 1) * chunkSize) })
+            body: JSON.stringify({ message_id: msgId, file_name: fileName, chunk_index: ci, total_chunks: totalChunks, data: b64.slice(ci * chunkSize, (ci + 1) * chunkSize) })
           });
-          if (!up.ok) return { ok: false, err: '청크 업ꡜ드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
+          if (!up.ok) return { ok: false, err: '청크 업로드 실패 (' + ci + '/' + totalChunks + '): ' + up.status };
         }
         return { ok: true };
       }
@@ -1233,7 +1233,7 @@ async function sendMessage() {
   const text = inp.value.trim();
   if (!text && !attachments.length) return;
   if (!chatId) return;
-  if (!relayOnline) { toast('禴레이가 오프라일을 첨부하세요'); return; }
+  if (!relayOnline) { toast('릴레이가 오프라인입니다'); return; }
 
   const msgId = 'msg-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
 
@@ -1243,16 +1243,16 @@ async function sendMessage() {
   const textExtracted = attachments.filter(a => a.type === 'text-extracted');
   let extractedContent = '';
   for (const att of textExtracted) {
-    extractedContent += '\n\n=== 첨불파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
+    extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
   }
-  appendMsg({ id: msgId, role:'user', content: (text || '파일 분섑요 sent') + extractedContent,
+  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
     files: fileAtts.map(a=>({name:a.name,size:a.size})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
 
-  const title = text.slice(0,30) + (text.length>30?'...':'') || '[파일 첨부]';
+  const title = text.slice(0,30) + (text.length>30?'...':'') || '[m��일 첨부]';
   upsertHistory(chatId, title);
   document.getElementById('chatTitle').textContent = title;
 
@@ -1290,7 +1290,7 @@ async function sendMessage() {
           const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
           const _cr = await fetch(SUPA_URL + '/rest/v1/file_chunks', {
               method: 'POST',
-              headers:{
+              headers: {
                 'apikey': SUPA_KEY,
                 'Authorization': 'Bearer ' + SUPA_KEY,
                 'Content-Type': 'application/json',
@@ -1312,7 +1312,7 @@ async function sendMessage() {
         }
 
         fileRefs.push({ name: att.name, size: att.size, type: att.type, chunks: totalChunks });
-        toast('업로드 완냌: ' + att.name + ' (' + totalChunks + '�l�-���)');
+        toast('업로드 완료: ' + att.name + ' (' + totalChunks + '청크)');
       } catch (e) {
         toast('파일 업로드 실패: ' + att.name + ' - ' + e.message);
         setWaiting(false);
@@ -1326,7 +1326,7 @@ async function sendMessage() {
       const attExt = '.' + att.name.split('.').pop().toLowerCase();
       if (drmExts.includes(attExt)) {
         toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
-        const drmResult = awa)t triggerDrmDeprotect(msgId, att.name);
+        const drmResult = await triggerDrmDeprotect(msgId, att.name);
         if (!drmResult.ok) {
           toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
           setWaiting(false);
@@ -1741,7 +1741,7 @@ async function sendBridgeHeartbeat() {
       setStatus('Bridge', 'off', '⚠️ Supabase 응답 없음');
       showSupabasePausedWarning();
     }
-    // 그 외 네트워크 오류는 checkBridge()에서 처리
+    // 그 외 네트워크 오류늤 checkBridge()에서 처리
   } finally {
     clearTimeout(timer);
   }
@@ -1938,7 +1938,7 @@ function toast(msg, dur=3000) {
   setTimeout(() => el.classList.remove('show'), dur);
 }
 
-async function downloadAttachment(msgId, fileName) {
+acync function downloadAttachment(msgId, fileName) {
   toast('📥 다운로드 중...');
   try {
     const chunks = await sgRaw('file_chunks',
