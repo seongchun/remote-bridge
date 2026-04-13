@@ -195,7 +195,7 @@ async function chunksDownload(messageId, fileName) {
   return buffer;
 }
 
-// ── Heartbeat ────────────────────�if (['.pptx', '.ppt'].includes(ext)) {
+// ── Heartbeat ─────────────────────────────────────────────────────────────────
 async function sendHeartbeat() {
   const tsVal = new Date().toISOString();
   try {
@@ -238,6 +238,7 @@ function extractViaOfficeXML(filePath, ext) {
 
     const texts = [];
 
+    if (['.pptx', '.ppt'].includes(ext)) {
       // ppt/slides/slide*.xml → <a:t> 태그
       const slidesDir = path.join(tmpDir, 'ppt', 'slides');
       if (!fs.existsSync(slidesDir)) throw new Error('ppt/slides 디렉토리 없음 — DRM 파일일 수 있음');
@@ -632,60 +633,6 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
           return text;
         }
       } catch(e) {
-        errors.xt = extractViaMarkitdown(filePath);
-      if (text && text.length > 10) return text;
-    } catch(e) {}
-    return `[PDF 텍스트 추출 실패: ${fileName}]\n💡 pip install pdfminer.six`;
-  }
-
-  if (isOffice) {
-    const errors = {};
-
-    // ── Method 0: Office XML (PowerShell Expand-Archive) ──────────────────────
-    try {
-      log('[Extract] Method 0: Office XML -', fileName);
-      const text = extractViaOfficeXML(filePath, ext);
-      if (text && text.length > 10) {
-        log('[Extract] Method 0 성공 ✓');
-        return text;
-      }
-    } catch(e) {
-      errors.officeXml = e.message.slice(0, 150);
-      warn('[Extract] Method 0 실패:', errors.officeXml);
-      // DRM 파일이면 다른 방법으로
-      const isDrmHint = errors.officeXml.includes('DRM') || errors.officeXml.includes('없음');
-      if (!isDrmHint) {
-        sysLog('warn', 'office_xml_fail', { fileName, err: errors.officeXml });
-      }
-    }
-
-    // ── Method 1: markitdown ──────────────────────────────────────────────────
-    try {
-      log('[Extract] Method 1: markitdown -', fileName);
-      const text = extractViaMarkitdown(filePath);
-      if (text && text.length > 10) {
-        log('[Extract] Method 1 성공 ✓');
-        return text;
-      }
-    } catch(e) {
-      errors.markitdown = e.message.slice(0, 100);
-      warn('[Extract] Method 1 실패:', errors.markitdown);
-      // markitdown 없으면 자동 설치 시도 (비동기, 다음 파일에 적용)
-      if (errors.markitdown.includes('not found') || errors.markitdown.includes('not recognized')) {
-        tryAutoInstallMarkitdown().catch(() => {});
-      }
-    }
-
-    // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
-    if (isPptx) {
-      try {
-        log('[Extract] Method 2: python-pptx -', fileName);
-        const text = extractViaPythonPptx(filePath);
-        if (text && text.length > 10) {
-          log('[Extract] Method 2 성공 ✓');
-          return text;
-        }
-      } catch(e) {
         errors.pythonPptx = e.message.slice(0, 100);
         warn('[Extract] Method 2 실패:', errors.pythonPptx);
       }
@@ -950,7 +897,7 @@ async function buildPrompt(chatId, currentContent) {
       .map(m => {
         let line = (m.role === 'user' ? 'Human' : 'Assistant') + ': ' + (m.content || '').slice(0, 600);
         if (m.files && Array.isArray(m.files) && m.files.length > 0) {
-          line += '\nA첨부파일: ' + m.files.map(f => f.name).join(', ') + ']';
+          line += '\n[첨부파일: ' + m.files.map(f => f.name).join(', ') + ']';
         }
         return line;
       })
