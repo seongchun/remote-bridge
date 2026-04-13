@@ -787,7 +787,7 @@ body {
         <div class="proj-ico">🏢</div>
         <div>
           <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v33</div>
+          <div class="proj-sub">Remote Bridge v34</div>
         </div>
       </div>
     </div>
@@ -1712,20 +1712,39 @@ async function checkBridge() {
 
 /* Bridge → Supabase 하트비트 전송 (relay가 Bridge 온라인 여부를 판단하는 데 사용) */
 async function sendBridgeHeartbeat() {
+  // [FIX v34] AbortController 타임아웃 추가 — 미설정 시 fetch가 무한 대기해
+  //           뒤따르는 checkRelay()/checkBridge() 가 영원히 실행되지 않는 버그 수정
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
   try {
     const tsVal = new Date().toISOString();
     const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' };
     const resp = await fetch(SUPA_URL + '/rest/v1/commands?on_conflict=id', {
-      method: 'POST', headers: _hd,
+      method: 'POST', headers: _hd, signal: ctrl.signal,
       body: JSON.stringify({ id: 'bridge-heartbeat', action: 'heartbeat', target: 'bridge', content: 'online', status: 'completed', result: tsVal }),
     });
-    // [FIX] resp.ok 확인 후에만 상태 업데이트 — HTTP 오류 시 false positive 방지
     if (resp.ok) {
       _lastHeartbeatSentAt = Date.now();
       bridgeOnline = true;
       setStatus('Bridge', 'on', '온라인');
+    } else {
+      // HTTP 오류 (4xx/5xx) — Supabase 일시정지 등
+      const body = await resp.text().catch(() => '');
+      if (resp.status === 503 || body.includes('paused') || body.includes('Project is paused')) {
+        setStatus('Bridge', 'off', '⚠️ Supabase 일시정지');
+        showSupabasePausedWarning();
+      }
     }
-  } catch(e) { /* silent — network 일시 오류 무시 */ }
+  } catch(e) {
+    if (e.name === 'AbortError') {
+      // 8초 타임아웃 → Supabase 응답 없음
+      setStatus('Bridge', 'off', '⚠️ Supabase 응답 없음');
+      showSupabasePausedWarning();
+    }
+    // 그 외 네트워크 오류는 checkBridge()에서 처리
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 let _supabaseWarnShown = false;
