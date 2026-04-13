@@ -787,7 +787,7 @@ body {
         <div class="proj-ico">🏢</div>
         <div>
           <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v34</div>
+          <div class="proj-sub">Remote Bridge v35</div>
         </div>
       </div>
     </div>
@@ -1320,23 +1320,11 @@ async function sendMessage() {
       }
     }
 
-        /* STEP 1.5: DRM 선처리 — 회사 PC에서 Office COM으로 DRM 해제 후 relay가 일반 파일 다운로드 */
-    const drmExts = ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'];
-    for (const att of filesToUpload) {
-      const attExt = '.' + att.name.split('.').pop().toLowerCase();
-      if (drmExts.includes(attExt)) {
-        toast('🔄 DRM 변환 중: ' + att.name + ' (30~60초 소요)...');
-        const drmResult = await triggerDrmDeprotect(msgId, att.name);
-        if (!drmResult.ok) {
-          toast('❌ DRM 변환 실패: ' + att.name + '\n오류: ' + drmResult.err);
-          setWaiting(false);
-          return;
-        }
-        toast('✅ DRM 변환 완료: ' + att.name);
-      }
-    }
+        /* [v35 FIX] DRM 선처리 제거 — 회사 PC는 브라우저 단독(PowerShell 실행 불가)
+       Office 파일은 집 PC relay가 PowerShell Office XML 추출로 직접 처리.
+       DRM 보호 파일이면 relay가 추출 실패 → 자동으로 오류 메시지를 사용자에게 전달. */
 
-/* STEP 2: Insert message with file metadata */
+    /* STEP 2: Insert message with file metadata */
     const messageData = {
       id: msgId,
       chat_id: chatId,
@@ -1350,8 +1338,15 @@ async function sendMessage() {
     startPolling(2000);
     startWatchdog(msgId, chatId);  // 응답 없음 자동 감지 시작
   } catch(e) {
+    // [v35 FIX] 전송 실패 시 사용자에게 채팅으로 에러 표시 + 자동 디버깅
+    console.error('[sendMessage] 전송 실패:', e);
     toast('전송 실패: ' + e.message);
+    appendSystemMsg(chatId,
+      '❌ **메시지 전송 실패**\n\n오류: ' + e.message +
+      '\n\n**자동 확인 중...**\n- Supabase 연결 상태\n- 릴레이 하트비트\n- 파일 청크 업로드 상태');
     setWaiting(false);
+    // 자동 디버깅 트리거
+    setTimeout(() => { if (!debugInProgress) runWatchdog(msgId, chatId); }, 2000);
   }
 }
 
