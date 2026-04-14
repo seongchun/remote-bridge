@@ -1,16 +1,21 @@
 /**
- * Remote Bridge Relay Worker v35
+ * Remote Bridge Relay Worker v36
  * ======================================
- * 변경사항 (v33 → v35):
- * - [SYNC] cowork-web.html과 버전 통일 (v35)
- * - [FIX] 회사 PC DRM STEP 1.5 제거와 동기화 — relay가 원본 Office 파일 직접 처리
- * - [NEW] 처리 시작 즉시 heartbeat 1회 강제 전송 → 브라우저가 빠르게 감지
- *
- * v33 기능 유지:
- * - extractViaOfficeXML(): PowerShell Expand-Archive로 Office 텍스트 추출
- * - watchdogRecovery(): 60초마다 processing > 3분 메시지 자동 복구
- * - 즉시 "🔄 처리 중..." 임시 메시지
- * - 오류 메시지 5회 재시도, supaReq 5회 재시도
+ * 변경사항 (v35 → v36):
+ * - [ARCH] DRM 파일 처리 정공법 복원:
+ *   1) Method 0(ZIP 구조) 실패 + DRM 서명 감지
+ *   2) Bridge 온라인이면 → Methods 1,2 건너뛰고 Method 3(회사 PC Office COM→PDF) 직행
+ *   3) Bridge 오프라인이면 → 즉시 DRM 안내 반환 (fail-fast, 3~10초 낭비 제거)
+ * - [FIX] Method 3 PowerShell 오류 수정:
+ *   * Supabase REST 문법 =eq= → =eq. (올바른 필터)
+ *   * $i: (스코프 구분자로 해석됨) → ${i}: (변수 종료 명시)
+ * - [FIX] Claude 프롬프트에 DRM 감지 시 명확한 시스템 지침 주입
+ *   → 사용자에게 환각 대신 정확한 DRM 안내 제공
+ * - [UX] interim 메시지 컨텍스트별 구분:
+ *   * 파일 없음: "💭 답변 생성 중..."
+ *   * 파일 있음: "📎 파일 분석 중... (N개)"
+ *   → 실제와 맞지 않는 고정 문구 제거
+ * - [SYNC] cowork-web.html v36과 동기화
  */
 'use strict';
 const https    = require('https');
@@ -24,7 +29,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v35';
+const VERSION   = 'v36';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
@@ -427,9 +432,10 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     `$fileName = '${safeName}'`,
     `$ext = '${ext}'`,
     '',
+    // [v36 FIX] Supabase REST 문법은 =eq. (점) — 이전 =eq= 이중등호는 잘못됨
     '$uri = $supaUrl + "/rest/v1/file_chunks" +',
-    '  "?message_id=eq=" + [uri]::EscapeDataString($msgId) +',
-    '  "&file_name=eq=" + [uri]::EscapeDataString($fileName) +',
+    '  "?message_id=eq." + [uri]::EscapeDataString($msgId) +',
+    '  "&file_name=eq." + [uri]::EscapeDataString($fileName) +',
     '  "&order=chunk_index.asc&select=chunk_index,data"',
     '$hdr = @{ apikey = $supaKey; Authorization = "Bearer $supaKey" }',
     'try {',
@@ -506,7 +512,8 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '$totalLen  = $b64Pdf.Length',
     '$totalChunks = [Math]::Ceiling($totalLen / $chunkSize)',
     '$pdfName = $fileName + ".drm.pdf"',
-    '$delUri = $supaUrl + "/rest/v1/file_chunks?message_id=eq=" + [uri]::EscapeDataString($msgId) + "&file_name=eq=" + [uri]::EscapeDataString($pdfName)',
+    // [v36 FIX] =eq= → =eq.
+    '$delUri = $supaUrl + "/rest/v1/file_chunks?message_id=eq." + [uri]::EscapeDataString($msgId) + "&file_name=eq." + [uri]::EscapeDataString($pdfName)',
     'try { Invoke-RestMethod -Uri $delUri -Headers $hdr -Method Delete } catch {}',
     'for ($i = 0; $i -lt $totalChunks; $i++) {',
     '  $start  = $i * $chunkSize',
@@ -516,7 +523,8 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
     '  $insUri = $supaUrl + "/rest/v1/file_chunks"',
     '  $insHdr = $hdr + @{ "Content-Type" = "application/json"; "Prefer" = "return=minimal" }',
     '  try { Invoke-RestMethod -Uri $insUri -Headers $insHdr -Method Post -Body $body | Out-Null }',
-    '  catch { Write-Output ("FAIL:upload chunk $i: " + $_.Exception.Message); return }',
+    // [v36 FIX] PowerShell에서 "$i:"는 scope 구분자로 해석되어 파싱 오류 → ${i}로 명시
+    '  catch { Write-Output ("FAIL:upload chunk ${i}: " + $_.Exception.Message); return }',
     '}',
     'Write-Output ("OK:UPLOADED_PDF:" + $pdfName + ":chunks=" + $totalChunks)',
   ];
@@ -590,6 +598,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
     const errors = {};
 
     // ── Method 0: Office XML (PowerShell Expand-Archive) ──────────────────────
+    // 이것이 실패하는 방식으로 DRM 여부를 즉시 판단한다.
     try {
       log('[Extract] Method 0: Office XML -', fileName);
       const text = extractViaOfficeXML(filePath, ext);
@@ -598,34 +607,52 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
         return text;
       }
     } catch(e) {
-      errors.officeXml = e.message.slice(0, 150);
+      errors.officeXml = e.message.slice(0, 200);
       warn('[Extract] Method 0 실패:', errors.officeXml);
-      // DRM 파일이면 다른 방법으로
-      const isDrmHint = errors.officeXml.includes('DRM') || errors.officeXml.includes('없음');
-      if (!isDrmHint) {
+
+      // [v36 FIX] DRM fail-fast: "not a supported archive" = 파일 자체가 ZIP이 아님 = DRM 암호화
+      const isDrmSignature =
+        /not a supported archive/i.test(errors.officeXml) ||
+        /supported archive file format/i.test(errors.officeXml) ||
+        /ppt\/slides 디렉토리 없음|word\/document\.xml 없음|xl\/worksheets 디렉토리 없음/.test(errors.officeXml);
+
+      if (isDrmSignature) {
+        // [v36 RESTORE] DRM 감지 시 Bridge 온라인이면 Method 3으로 회사 PC Office로 PDF 변환 시도
+        const bridgeOnline = await checkBridgeOnline();
+        if (!bridgeOnline) {
+          log('[Extract] DRM 파일 + Bridge 오프라인 → fail-fast');
+          sysLog('warn', 'drm_detected_no_bridge', { fileName, size: fileBuffer ? fileBuffer.length : 0 });
+          return `[DRM_PROTECTED:${fileName}]`;
+        }
+        log('[Extract] DRM 파일 감지됨 + Bridge 온라인 → Methods 1~2 건너뛰고 Method 3로 직행');
+        errors.drmDetected = true;
+        // fall through — Method 3만 시도
+      } else {
+        // DRM 아니면 일반 손상/구조 오류 — 다음 방법 시도
         sysLog('warn', 'office_xml_fail', { fileName, err: errors.officeXml });
       }
     }
 
-    // ── Method 1: markitdown ──────────────────────────────────────────────────
-    try {
-      log('[Extract] Method 1: markitdown -', fileName);
-      const text = extractViaMarkitdown(filePath);
-      if (text && text.length > 10) {
-        log('[Extract] Method 1 성공 ✓');
-        return text;
-      }
-    } catch(e) {
-      errors.markitdown = e.message.slice(0, 100);
-      warn('[Extract] Method 1 실패:', errors.markitdown);
-      // markitdown 없으면 자동 설치 시도 (비동기, 다음 파일에 적용)
-      if (errors.markitdown.includes('not found') || errors.markitdown.includes('not recognized')) {
-        tryAutoInstallMarkitdown().catch(() => {});
+    // ── Method 1: markitdown (비-DRM 파일의 대체 경로) ─────────────────────────
+    if (!errors.drmDetected) {
+      try {
+        log('[Extract] Method 1: markitdown -', fileName);
+        const text = extractViaMarkitdown(filePath);
+        if (text && text.length > 10) {
+          log('[Extract] Method 1 성공 ✓');
+          return text;
+        }
+      } catch(e) {
+        errors.markitdown = e.message.slice(0, 100);
+        warn('[Extract] Method 1 실패:', errors.markitdown);
+        if (errors.markitdown.includes('not found') || errors.markitdown.includes('not recognized')) {
+          tryAutoInstallMarkitdown().catch(() => {});
+        }
       }
     }
 
     // ── Method 2: python-pptx (PPTX only) ────────────────────────────────────
-    if (isPptx) {
+    if (isPptx && !errors.drmDetected) {
       try {
         log('[Extract] Method 2: python-pptx -', fileName);
         const text = extractViaPythonPptx(filePath);
@@ -639,40 +666,58 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
       }
     }
 
-    // ── Method 3: Bridge DRM (COM → PDF) ─────────────────────────────────────
-    const bridgeOnline = await checkBridgeOnline();
-    if (bridgeOnline) {
-      try {
-        log('[Extract] Method 3: Bridge DRM -', fileName);
-        const uploadedPdfName = await extractViaBridgeCOMDirect(messageId, fileName);
-        const pdfBuffer = await chunksDownload(messageId, uploadedPdfName);
-        const pdfPath = path.join(os.tmpdir(), 'relay-drm-' + Date.now() + '.pdf');
-        fs.writeFileSync(pdfPath, pdfBuffer);
+    // ── Method 3: Bridge DRM (회사 PC Office COM → PDF → 텍스트) ──────────────
+    // 사용자의 공식 아키텍처: 회사 PC의 정품 Office로 DRM 파일을 열어
+    // DRM이 해제된 PDF로 저장 → 집 PC가 PDF 텍스트 추출
+    // DRM 감지됐거나 Methods 1~2 모두 실패 시 실행 (Bridge 온라인일 때만)
+    if (errors.drmDetected || (errors.markitdown && (errors.pythonPptx || !isPptx))) {
+      const bridgeOnline = await checkBridgeOnline();
+      if (bridgeOnline) {
         try {
-          const text = extractViaPdf(pdfPath);
-          if (text && text.length > 10) {
-            log('[Extract] Method 3 성공 ✓');
-            await dbDelete('file_chunks', `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(uploadedPdfName)}`);
-            return text;
+          log('[Extract] Method 3: Bridge DRM (Office COM → PDF) -', fileName);
+          const uploadedPdfName = await extractViaBridgeCOMDirect(messageId, fileName);
+          const pdfBuffer = await chunksDownload(messageId, uploadedPdfName);
+          const pdfPath = path.join(os.tmpdir(), 'relay-drm-' + Date.now() + '.pdf');
+          fs.writeFileSync(pdfPath, pdfBuffer);
+          try {
+            const text = extractViaPdf(pdfPath);
+            if (text && text.length > 10) {
+              log('[Extract] Method 3 성공 ✓ (DRM 우회)');
+              sysLog('info', 'drm_bypass_success', { fileName, textLen: text.length });
+              try {
+                await dbDelete('file_chunks',
+                  `message_id=eq.${encodeURIComponent(messageId)}&file_name=eq.${encodeURIComponent(uploadedPdfName)}`);
+              } catch(_) {}
+              return text;
+            }
+          } finally {
+            try { fs.unlinkSync(pdfPath); } catch(_) {}
           }
-        } finally {
-          try { fs.unlinkSync(pdfPath); } catch(e) {}
+        } catch(e) {
+          errors.bridgeDrm = e.message.slice(0, 200);
+          err('[Extract] Method 3 실패:', errors.bridgeDrm);
+          sysLog('error', 'bridge_drm_fail', { fileName, err: errors.bridgeDrm });
         }
-      } catch(e) {
-        errors.bridgeDrm = e.message.slice(0, 150);
-        err('[Extract] Method 3 실패:', errors.bridgeDrm);
+      } else {
+        log('[Extract] Method 3 건너뜀: Bridge 오프라인');
+        errors.bridgeDrm = 'bridge_offline';
       }
     }
 
-    // 모든 방법 실패 — 상세 오류 반환
+    // DRM 파일인데 Method 3도 실패했으면 명시적 DRM 응답
+    if (errors.drmDetected) {
+      return `[DRM_PROTECTED:${fileName}]`;
+    }
+
+    // 모든 방법 실패 (DRM은 아니지만 추출 불가)
     const errorSummary = Object.entries(errors).map(([k, v]) => `• ${k}: ${v}`).join('\n');
     sysLog('error', 'extract_all_methods_failed', { fileName, errors: JSON.stringify(errors) });
     return `[파일 내용 추출 실패: ${fileName}]\n\n` +
            `시도한 방법:\n${errorSummary}\n\n` +
            `💡 해결 방법:\n` +
-           `1. 일반 PPTX: PowerShell이 설치됐는지 확인하세요\n` +
-           `2. DRM 파일: 회사 PC에서 start-bridge.bat 실행 후 재시도\n` +
-           `3. 홈 PC: pip install markitdown[all]`;
+           `1. 파일이 손상되지 않았는지 확인하세요\n` +
+           `2. 집 PC: pip install markitdown[all]\n` +
+           `3. 또는 내용을 텍스트로 복사해서 직접 붙여넣기`;
   }
 
   return `[지원하지 않는 파일 형식: ${ext}]\n지원 형식: .pptx .ppt .docx .doc .xlsx .xls .pdf`;
@@ -924,17 +969,21 @@ async function processMessage(msg) {
   try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'processing' }); } catch(e) {}
   await sendHeartbeat();
 
-  // [v33 NEW] 즉시 임시 메시지 → 사용자에게 처리 시작 알림
+  // [v36 UX] 컨텍스트별 interim 메시지 — 실제와 맞게
+  const fileCount = (msg.files && Array.isArray(msg.files)) ? msg.files.length : 0;
+  const interimText = fileCount > 0
+    ? `📎 파일 분석 중... (${fileCount}개 파일)`
+    : `💭 답변 생성 중...`;
   const interimId = 'interim-' + id.slice(0, 8) + '-' + Date.now();
   let interimSent = false;
   try {
     await dbInsert('messages', {
       id: interimId, chat_id, role: 'assistant',
-      content: '🔄 처리 중입니다... (파일 분석 및 Claude 응답 생성 중, 최대 2분 소요)',
+      content: interimText,
       status: 'pending', files: null, created_at: new Date().toISOString(),
     });
     interimSent = true;
-    log('[Worker] 임시 메시지 전송 ✓');
+    log('[Worker] 임시 메시지 전송 ✓ (' + interimText + ')');
   } catch(e) {
     warn('[Worker] 임시 메시지 전송 실패 (무시):', e.message.slice(0, 80));
   }
@@ -961,13 +1010,37 @@ async function processMessage(msg) {
 
     // 파일 텍스트 추출
     let fileContentText = '';
+    let drmBlockedFiles = [];
     for (const file of attachedFiles) {
       log('[Worker] 파일 추출:', file.name);
       const extractedText = await extractFileContent(id, file.name, file.path, file.buffer);
-      fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
+      // [v36] DRM 감지 시 전용 섹션으로 분리
+      const drmMatch = /^\[DRM_PROTECTED:(.+)\]$/.exec(extractedText);
+      if (drmMatch) {
+        drmBlockedFiles.push(drmMatch[1]);
+      } else {
+        fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
+      }
     }
 
-    const finalContent = content + fileContentText;
+    // [v36] DRM 파일이 있으면 Claude에게 명확한 시스템 지침 주입 → 환각 방지
+    let systemDirective = '';
+    if (drmBlockedFiles.length > 0) {
+      systemDirective =
+        '\n\n[시스템 지침 — 반드시 따를 것]\n' +
+        '사용자가 첨부한 다음 파일은 DRM(문서보안)으로 암호화되어 있어 내용을 읽을 수 없습니다:\n' +
+        drmBlockedFiles.map(f => '• ' + f).join('\n') + '\n\n' +
+        '사용자에게 다음 내용 그대로 안내하세요. 파일 경로나 폴더 권한에 대해 언급하지 마세요:\n' +
+        '──────────────────────────\n' +
+        '❌ 첨부하신 파일은 회사 문서보안(DRM)으로 암호화되어 있어 읽을 수 없습니다.\n\n' +
+        '📌 해결 방법 (택 1):\n' +
+        '1. **PowerPoint에서 열기 → 다른 이름으로 저장** → 파일 형식 "PowerPoint 프레젠테이션(*.pptx)"으로 저장 → 보안 해제된 파일을 업로드\n' +
+        '2. **내용 복사하여 붙여넣기**: PPT 내용을 선택하고 Ctrl+C → 이 채팅창에 Ctrl+V\n' +
+        '3. **화면 캡처 후 업로드**: 슬라이드를 캡처해서 이미지로 업로드 (이미지는 DRM 대상 아님)\n' +
+        '──────────────────────────\n';
+    }
+
+    const finalContent = content + fileContentText + systemDirective;
     const prompt = await buildPrompt(chat_id, finalContent);
     log('[Worker] 프롬프트 길이:', prompt.length);
 
@@ -1056,9 +1129,10 @@ async function main() {
 
   console.log('╔══════════════════════════════════════════════════╗');
   console.log('║  Remote Bridge Relay Worker ' + VERSION + '                 ║');
-  console.log('║  [NEW] Office XML 추출 (PowerShell, Python 불필요)║');
-  console.log('║  [NEW] 60초 워치독 자동 복구                      ║');
-  console.log('║  [NEW] 즉시 임시 메시지 + 오류 5회 재시도         ║');
+  console.log('║  [v36] DRM 감지 → Bridge Office COM → PDF 변환     ║');
+  console.log('║  [v36] Bridge 오프라인이면 DRM fail-fast (빠른 안내)║');
+  console.log('║  [v36] 컨텍스트별 대기 메시지 (파일/텍스트 구분)   ║');
+  console.log('║  [v33] Office XML / 워치독 / 5회 재시도 유지       ║');
   console.log('╠══════════════════════════════════════════════════╣');
   console.log('║  Hostname: ' + HOSTNAME.padEnd(38) + '║');
   console.log('║  PID:      ' + String(process.pid).padEnd(38) + '║');
