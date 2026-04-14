@@ -1,6 +1,11 @@
 /**
- * Remote Bridge Relay Worker v36
+ * Remote Bridge Relay Worker v37
  * ======================================
+ * 변경사항 (v36 → v37):
+ * - [ARCH] DRM 텍스트 추출 경로 최적화:
+ *   cowork-web.html이 DRM 감지 → Bridge COM 텍스트 직접 추출 → 텍스트만 relay 전달
+ *   (DRM 원본 바이트는 집 PC로 전송하지 않음)
+ *
  * 변경사항 (v35 → v36):
  * - [ARCH] DRM 파일 처리 정공법 복원:
  *   1) Method 0(ZIP 구조) 실패 + DRM 서명 감지
