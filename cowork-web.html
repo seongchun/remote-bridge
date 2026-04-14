@@ -787,7 +787,7 @@ body {
         <div class="proj-ico">🏢</div>
         <div>
           <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v37</div>
+          <div class="proj-sub">Remote Bridge v38</div>
         </div>
       </div>
     </div>
@@ -1608,10 +1608,12 @@ async function sendMessage() {
       }
     }
 
-    /* [v37] STEP 1.5: DRM 파일 → Bridge COM 텍스트 추출 (회사 PC 내에서 완결)
-       DRM 원본은 Supabase에 임시 업로드 → Bridge가 다운로드 → Office COM 텍스트 추출
-       → 추출 텍스트만 브라우저로 반환 → DRM 원본 Supabase에서 즉시 삭제
-       → 집 PC에는 텍스트만 전달 (DRM 바이트 절대 전송 안 함) */
+    /* [v38] STEP 1.5: DRM 파일 → Bridge COM PDF 변환 → 전체 파일로 전송
+       DRM 원본 → Bridge COM → ExportAsFixedFormat → PDF
+       → PDF 전체 바이트를 브라우저 수신 → Supabase file_chunks에 재업로드
+       → relay가 전체 PDF 파일을 다운로드하여 Claude CLI에 전달
+       → Claude가 파일을 직접 분석/수정 → 결과 파일 자동 반환
+       (v37: 텍스트만 전달 → v38: 전체 파일 전달) */
     const drmAtts = savedAttachments.filter(a => a.type === 'drm-pending');
     if (drmAtts.length > 0 && !bridgeOnline) {
       toast('⚠️ Bridge 오프라인: DRM 변환 불가');
@@ -1624,7 +1626,7 @@ async function sendMessage() {
     }
     for (let di = 0; di < drmAtts.length; di++) {
       const att = drmAtts[di];
-      toast('🔐 DRM 변환 (' + (di+1) + '/' + drmAtts.length + '): ' + att.name);
+      toast('🔐 DRM→PDF 변환 (' + (di+1) + '/' + drmAtts.length + '): ' + att.name);
       try {
         /* DRM 바이트를 Supabase에 임시 업로드 (Bridge가 다운로드 용) */
         const base64 = att.data.split(',')[1];
@@ -1637,11 +1639,13 @@ async function sendMessage() {
             body: JSON.stringify({ message_id: msgId, file_name: att.name, chunk_index: ci, total_chunks: totalChunks, data: chunkData, file_size: att.size })
           });
         }
-        /* Bridge COM 텍스트 추출 실행 */
-        const drmResult = await triggerDrmTextExtract(msgId, att.name);
-        if (drmResult.ok && drmResult.text) {
-          extractedContent += '\n\n=== 첨부파일: ' + att.name + ' (DRM 변환) ===\n' + drmResult.text + '\n=== 끝 ===';
-          toast('✅ DRM 변환 완료: ' + att.name + ' (' + drmResult.text.length + '자)');
+        /* [v38] Bridge COM → PDF 변환 (전체 파일 보존) */
+        const drmResult = await triggerDrmDeprotect(msgId, att.name);
+        if (drmResult.ok) {
+          /* 변환된 PDF가 file_chunks에 업로드됨 (원본 이름으로)
+             → fileRefs에 추가하여 relay가 전체 파일을 다운로드하도록 함 */
+          fileRefs.push({ name: att.name, size: att.size, type: 'drm-converted' });
+          toast('✅ DRM→PDF 변환 완료: ' + att.name + ' (전체 파일 전송)');
         } else {
           toast('❌ DRM 변환 실패: ' + (drmResult.error || drmResult.err || '알 수 없는 오류'));
           appendSystemMsg(chatId,
@@ -1860,16 +1864,17 @@ function appendMsg(msg) {
       else                  att += `<div class="msg-file-chip" data-mid="${msg.id}" data-fn="${esc(a.name)}" onclick="downloadAttachment(this.dataset.mid,this.dataset.fn)">📄 ${esc(a.name)} ⬇️</div>`;
     });
 
-    /* Render files from Storage (new msg.files JSONB column) */
+    /* [v38] Render files — 사용자 파일 + 결과 파일 다운로드 */
     (msg.files || []).forEach(f => {
       if (isUser) {
         att += `<div class="msg-file-chip">📄 ${esc(f.name)}</div>`;
       } else {
-        att += `<a class="file-download-btn" href="${f.url}" target="_blank" download>
-          <span class="dl-icon">⬇️</span>
-          <span class="dl-text">다운로드</span>
-          <span class="dl-name">${esc(f.name)}</span>
-        </a>`;
+        /* [v38] 결과 파일: file_chunks에서 다운로드 */
+        att += `<div class="file-download-btn" onclick="downloadResultFile('${msg.id}','${esc(f.name)}','${f.size||0}')" style="cursor:pointer;display:inline-flex;align-items:center;gap:6px;background:#2563eb;color:#fff;padding:8px 14px;border-radius:8px;margin:4px 0;font-size:13px">
+          <span>⬇️</span>
+          <span>${esc(f.name)}</span>
+          <span style="opacity:.7;font-size:11px">${f.size ? '(' + Math.round(f.size/1024) + 'KB)' : ''}</span>
+        </div>`;
       }
     });
 
@@ -1955,6 +1960,46 @@ function addFile(path) {
   d.className = 'rp-file';
   d.innerHTML = `<span class="rp-file-ico">${ico}</span><span class="rp-file-name" title="${esc(path)}">${esc(name)}</span><span class="rp-file-badge">생성됨</span>`;
   list.appendChild(d);
+}
+
+/* [v38] 결과 파일 다운로드 (file_chunks에서 조립 → 브라우저 저장) */
+async function downloadResultFile(msgId, fileName, fileSize) {
+  toast('📥 파일 다운로드 중: ' + fileName);
+  try {
+    const resp = await fetch(SUPA_URL + '/rest/v1/file_chunks?message_id=eq.' + encodeURIComponent(msgId)
+      + '&file_name=eq.' + encodeURIComponent(fileName)
+      + '&order=chunk_index.asc&select=data', {
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const rows = await resp.json();
+    if (!rows || rows.length === 0) throw new Error('파일 청크 없음');
+
+    const b64 = rows.map(r => r.data).join('');
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+
+    /* MIME 타입 추론 */
+    const ext = fileName.split('.').pop().toLowerCase();
+    const mimes = {
+      'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'pdf': 'application/pdf', 'png': 'image/png', 'jpg': 'image/jpeg',
+      'txt': 'text/plain', 'html': 'text/html', 'csv': 'text/csv'
+    };
+    const mime = mimes[ext] || 'application/octet-stream';
+
+    const blob = new Blob([bytes], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fileName;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 3000);
+    toast('✅ 다운로드 완료: ' + fileName + ' (' + Math.round(bytes.length / 1024) + 'KB)');
+  } catch(e) {
+    toast('❌ 다운로드 실패: ' + e.message);
+    console.error('[downloadResultFile]', e);
+  }
 }
 
 /* ════════════════════════════════════════
