@@ -34,7 +34,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v36';
+const VERSION   = 'v37';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
