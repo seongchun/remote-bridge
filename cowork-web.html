@@ -787,7 +787,7 @@ body {
         <div class="proj-ico">🏢</div>
         <div>
           <div class="proj-name">회사 PC 코워크</div>
-          <div class="proj-sub">Remote Bridge v36</div>
+          <div class="proj-sub">Remote Bridge v37</div>
         </div>
       </div>
     </div>
@@ -1018,8 +1018,257 @@ async function extractPptxText(file) {
   }
 }
 
+/* [v37] 범용 Office DRM 감지 — pptx/docx/xlsx 모두 ZIP 기반이므로 JSZip으로 판별 */
+async function detectOfficeDrm(file) {
+  if (typeof JSZip === 'undefined') return false;
+  try {
+    await JSZip.loadAsync(file);
+    return false;
+  } catch(e) {
+    const drmLikely = /signature not found|end of central|Corrupted zip/i.test(e.message || '');
+    return drmLikely ? { drm: true, reason: (e.message || '').slice(0, 100) } : false;
+  }
+}
 
-/* [v36] DRM 차단 파일 안내 모달 — 업로드 전 즉시 표시 */
+/* [v37] DRM 파일 → Bridge COM 텍스트 추출 (PDF 아닌 텍스트만 전송)
+   회사 PC Office COM으로 파일을 열어 텍스트를 직접 추출한 뒤
+   localhost HTTP를 통해 브라우저로 반환. DRM 원본은 회사 PC를 벗어나지 않음. */
+async function triggerDrmTextExtract(msgId, fileName) {
+  const ext = '.' + fileName.split('.').pop().toLowerCase();
+  const safeFn = fileName.replace(/['"\\]/g, '_');
+  const cmdId = 'drm-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+  const port = 7655;
+
+  /* ── COM 텍스트 추출 PowerShell (PPT/Word/Excel) ── */
+  const psLines = [
+    '& {',
+    '[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12',
+    "$ErrorActionPreference = 'Continue'",
+    "$supaUrl = '" + SUPA_URL + "'",
+    "$supaKey = '" + SUPA_KEY + "'",
+    "$msgId = '" + msgId + "'",
+    "$fileName = '" + safeFn + "'",
+    "$ext = '" + ext + "'",
+    "$ts = Get-Date -f 'yyyyMMddHHmmssfff'",
+    "$tmpSrc = [IO.Path]::Combine([IO.Path]::GetTempPath(), ('drm_src_' + $ts + $ext))",
+    "$tmpTxt = [IO.Path]::Combine([IO.Path]::GetTempPath(), ('drm_txt_' + $ts + '.txt'))",
+    "$hdrs = @{apikey=$supaKey; Authorization='Bearer ' + $supaKey}",
+    "$qM = [Uri]::EscapeDataString($msgId); $qF = [Uri]::EscapeDataString($fileName)",
+    '# STEP A: Download DRM file from Supabase',
+    "$rows = Invoke-RestMethod -Uri ($supaUrl+'/rest/v1/file_chunks?message_id=eq.'+$qM+'&file_name=eq.'+$qF+'&order=chunk_index.asc') -Headers $hdrs",
+    "if (-not $rows -or $rows.Count -eq 0) { Write-Output ('FAIL:NoChunks:' + $msgId); return }",
+    "$b64 = ($rows | ForEach-Object { $_.data }) -join ''",
+    '[IO.File]::WriteAllBytes($tmpSrc, [Convert]::FromBase64String($b64))',
+    '# STEP B: COM text extraction in background job',
+    '$comJob = Start-Job -ScriptBlock {',
+    '  param($src,$out,$ext)',
+    '  $ErrorActionPreference = "Stop"',
+    '  try {',
+    "    if (\$ext -eq '.pptx' -or \\$ext -eq '.ppt') {",
+    '      $app = New-Object -ComObject PowerPoint.Application; $app.Visible = 1',
+    '      $pres = $app.Presentations.Open($src, 0, 0, 1); Start-Sleep 8',
+    '      $text = ""',
+    '      $sn = 0',
+    '      foreach ($slide in $pres.Slides) {',
+    '        $sn++',
+    '        $text += "`n=== 슬라이드 $sn ===`n"',
+    '        foreach ($shape in $slide.Shapes) {',
+    '          if ($shape.HasTextFrame) {',
+    '            $tf = $shape.TextFrame.TextRange.Text',
+    '            if ($tf.Trim()) { $text += $tf + "`n" }',
+    '          }',
+    '          if ($shape.HasTable) {',
+    '            $tbl = $shape.Table',
+    '            for ($r = 1; $r -le $tbl.Rows.Count; $r++) {',
+    '              $cells = @()',
+    '              for ($c = 1; $c -le $tbl.Columns.Count; $c++) {',
+    '                try { $cells += $tbl.Cell($r,$c).Shape.TextFrame.TextRange.Text } catch { $cells += "" }',
+    '              }',
+    '              $text += ($cells -join " | ") + "`n"',
+    '            }',
+    '          }',
+    '        }',
+    '      }',
+    '      $pres.Close(); $app.Quit()',
+    "    } elseif (\$ext -eq '.xlsx' -or \\$ext -eq '.xls') {",
+    '      $app = New-Object -ComObject Excel.Application; $app.Visible = 0; $app.DisplayAlerts = 0',
+    '      $wb = $app.Workbooks.Open($src); Start-Sleep 6',
+    '      $text = ""',
+    '      foreach ($sheet in $wb.Worksheets) {',
+    '        $text += "`n=== " + $sheet.Name + " ===`n"',
+    '        $rng = $sheet.UsedRange',
+    '        if ($rng) {',
+    '          $maxR = [Math]::Min($rng.Rows.Count, 10000)',
+    '          for ($r = 1; $r -le $maxR; $r++) {',
+    '            $cells = @()',
+    '            for ($c = 1; $c -le $rng.Columns.Count; $c++) {',
+    '              $v = $rng.Cells($r,$c).Text; if ($v) { $cells += $v } else { $cells += "" }',
+    '            }',
+    '            $text += ($cells -join "`t") + "`n"',
+    '          }',
+    '        }',
+    '      }',
+    '      $wb.Close($false); $app.Quit()',
+    "    } elseif (\$ext -eq '.docx' -or \\$ext -eq '.doc') {",
+    '      $app = New-Object -ComObject Word.Application; $app.Visible = 0',
+    '      $wDoc = $app.Documents.Open($src, 0, 0); Start-Sleep 6',
+    '      $text = $wDoc.Content.Text',
+    '      foreach ($tbl in $wDoc.Tables) {',
+    '        $text += "`n--- 표 ---`n"',
+    '        for ($r = 1; $r -le $tbl.Rows.Count; $r++) {',
+    '          $cells = @()',
+    '          for ($c = 1; $c -le $tbl.Columns.Count; $c++) {',
+    '            try { $cells += $tbl.Cell($r,$c).Range.Text -replace "[\\r\\n\\a]","" } catch { $cells += "" }',
+    '          }',
+    '          $text += ($cells -join " | ") + "`n"',
+    '        }',
+    '      }',
+    '      $wDoc.Close($false); $app.Quit()',
+    "    } else { throw 'Unsupported: ' + \$ext }",
+    '    [IO.File]::WriteAllText($out, $text, [Text.Encoding]::UTF8)',
+    "    Write-Output 'COM_DONE'",
+    '  } catch {',
+    "    Write-Output ('COM_FAIL:' + \$_.Exception.Message)",
+    '  }',
+    '} -ArgumentList $tmpSrc,$tmpTxt,$ext',
+    '# FED5 (EP) pre-existing windows',
+    '$preFed5Ids = @(Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" } | Select-Object -ExpandProperty Id)',
+    '# Monitor COM job: 3-min base timeout; extend if EP dialog appears',
+    '$epDetected = $false; $comWait = 0; $maxWait = 180',
+    'while ($comJob.State -eq "Running" -and $comWait -lt $maxWait) {',
+    '  Start-Sleep 2; $comWait += 2',
+    '  $newFed5 = Get-Process -EA 0 | Where-Object { $_.MainWindowTitle -ne "" -and $_.MainWindowTitle -match "FED5" -and $preFed5Ids -notcontains $_.Id }',
+    '  if ($newFed5 -and -not $epDetected) {',
+    '    $epDetected = $true',
+    '    if (($maxWait - $comWait) -lt 90) { $maxWait = $comWait + 90 }',
+    '  }',
+    '}',
+    'if ($comJob.State -ne "Completed") {',
+    '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0; Remove-Item $tmpSrc -EA 0',
+    "  if ($epDetected) { Write-Output 'EP_LOGIN_REQUIRED' } else { Write-Output 'COM_TIMEOUT' }",
+    '  return',
+    '}',
+    '$comOut = (Receive-Job $comJob 2>&1 | Out-String).Trim(); Remove-Job $comJob',
+    "if ($comOut -notmatch 'COM_DONE') { Remove-Item $tmpSrc -EA 0; Write-Output ('COM_FAIL:' + $comOut); return }",
+    'Remove-Item $tmpSrc -ErrorAction SilentlyContinue',
+    '# Serve extracted text via localhost HTTP',
+    '$jPath = $tmpTxt; $pp = ' + port,
+    'Start-Job -ScriptBlock {',
+    '  param($fp, $pp)',
+    '  try {',
+    "    $lis = New-Object System.Net.HttpListener",
+    "    $lis.Prefixes.Add('http://localhost:' + $pp + '/')",
+    '    $lis.Start()',
+    '    $ctx = $lis.GetContext()',
+    "    $ctx.Response.Headers.Add('Access-Control-Allow-Origin','*')",
+    "    $ctx.Response.Headers.Add('Access-Control-Allow-Methods','GET,OPTIONS')",
+    "    if ($ctx.Request.HttpMethod -eq 'OPTIONS') {",
+    '      $ctx.Response.StatusCode = 200; $ctx.Response.Close()',
+    '      $ctx = $lis.GetContext()',
+    "      $ctx.Response.Headers.Add('Access-Control-Allow-Origin','*')",
+    "      $ctx.Response.Headers.Add('Access-Control-Allow-Methods','GET,OPTIONS')",
+    '    }',
+    '    $bytes = [IO.File]::ReadAllBytes($fp)',
+    "    $ctx.Response.ContentType = 'text/plain; charset=utf-8'",
+    '    $ctx.Response.ContentLength64 = $bytes.LongLength',
+    '    $ctx.Response.OutputStream.Write($bytes, 0, $bytes.Length)',
+    '    $ctx.Response.Close(); $lis.Stop()',
+    '    Remove-Item $fp -ErrorAction SilentlyContinue',
+    '  } catch {}',
+    "} -ArgumentList $jPath,$pp | Out-Null",
+    'Start-Sleep 2',
+    "Write-Output ('SERVING:' + $pp)",
+    '}'
+  ];
+  const psContent = psLines.join('\r\n');
+
+  /* ── Supabase에 Bridge 명령 삽입 ── */
+  try {
+    const _hd = { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' };
+    await fetch(SUPA_URL + '/rest/v1/commands?id=like.drm-%25&status=eq.pending', { method: 'DELETE', headers: _hd });
+  } catch(_e) {}
+
+  const r1 = await fetch(SUPA_URL + '/rest/v1/commands', {
+    method: 'POST',
+    headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+    body: JSON.stringify({ id: cmdId, action: 'run_ps', target: 'bridge', content: psContent, status: 'pending', created_at: new Date().toISOString() })
+  });
+  if (!r1.ok) return { ok: false, error: '명령 삽입 실패: ' + r1.status };
+
+  toast('⏳ DRM 텍스트 추출 중... (회사 PC Office COM)');
+
+  /* ── 결과 대기 (150s) ── */
+  const deadline = Date.now() + 150000;
+  let resultStr = '';
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const rp = await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId) + '&select=status,result', {
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY }
+      });
+      const rows = await rp.json();
+      if (rows.length > 0) {
+        const s = rows[0].status;
+        if (s === 'complete' || s === 'completed' || s === 'error') {
+          resultStr = rows[0].result || '';
+          break;
+        }
+      }
+    } catch(_e) {}
+  }
+
+  /* Cleanup command */
+  try {
+    await fetch(SUPA_URL + '/rest/v1/commands?id=eq.' + encodeURIComponent(cmdId), {
+      method: 'DELETE',
+      headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
+    });
+  } catch(_e) {}
+
+  if (!resultStr) return { ok: false, error: 'DRM 텍스트 추출 타임아웃 (150초)' };
+
+  /* ── 결과 해석 ── */
+  if (resultStr.startsWith('FAIL:')) return { ok: false, error: 'PS 오류: ' + resultStr.slice(5, 300) };
+  if (resultStr.startsWith('EP_LOGIN_REQUIRED')) {
+    const shouldRetry = await showEPLoginModal();
+    if (shouldRetry) return triggerDrmTextExtract(msgId, fileName);
+    return { ok: false, error: 'EP 로그인이 취소되었습니다' };
+  }
+  if (resultStr.startsWith('COM_TIMEOUT')) return { ok: false, error: 'COM 타임아웃 (3분) — Office 응답 없음' };
+  if (resultStr.startsWith('COM_FAIL:')) return { ok: false, error: 'COM 오류: ' + resultStr.slice(9) };
+
+  if (resultStr.startsWith('SERVING:')) {
+    const srvPort = resultStr.replace('SERVING:', '').trim();
+    toast('📥 텍스트 수신 중... (localhost:' + srvPort + ')');
+
+    let extractedText = null;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      await new Promise(r => setTimeout(r, 2000));
+      try {
+        const fr = await fetch('http://localhost:' + srvPort + '/');
+        if (fr.ok) {
+          extractedText = await fr.text();
+          if (extractedText && extractedText.length > 5) break;
+        }
+      } catch(_e) {}
+    }
+    if (!extractedText || extractedText.length < 5) return { ok: false, error: '텍스트 수신 실패 (port:' + srvPort + ')' };
+
+    /* ── DRM 원본 청크 Supabase에서 삭제 (보안) ── */
+    try {
+      await fetch(SUPA_URL + '/rest/v1/file_chunks?message_id=eq.' + encodeURIComponent(msgId) + '&file_name=eq.' + encodeURIComponent(fileName), {
+        method: 'DELETE',
+        headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
+      });
+    } catch(_e) {}
+
+    return { ok: true, text: extractedText };
+  }
+
+  return { ok: false, error: '예상치 못한 결과: ' + resultStr.slice(0, 200) };
+}
+
+/* [v36] DRM 차단 파일 안내 모달 — Bridge 오프라인 시 폴백 */
 function showDrmBlockedModal(fileName) {
   const esc = (s) => String(s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
   const existing = document.getElementById('drmBlockedOv');
@@ -1277,14 +1526,16 @@ async function sendMessage() {
   /* Optimistic UI */
   const imgs  = attachments.filter(a => a.type === 'image');
   const fileAtts = attachments.filter(a => a.type === 'file');
+  const drmPending = attachments.filter(a => a.type === 'drm-pending');
   const textExtracted = attachments.filter(a => a.type === 'text-extracted');
   let extractedContent = '';
   for (const att of textExtracted) {
     extractedContent += '\n\n=== 첨부파일: ' + att.name + ' ===\n' + att.extractedText + '\n=== 끝 ===';
   }
-  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent,
+  const drmLabel = drmPending.length > 0 ? '\n\n🔐 DRM 파일 Bridge 변환 중: ' + drmPending.map(a=>a.name).join(', ') : '';
+  appendMsg({ id: msgId, role:'user', content: (text || '파일 분석 요청') + extractedContent + drmLabel,
     attachments: imgs.map(a=>({type:'image',name:a.name,data:a.data})),
-    files: fileAtts.map(a=>({name:a.name,size:a.size})) });
+    files: [...fileAtts, ...drmPending].map(a=>({name:a.name,size:a.size})) });
 
   document.getElementById('chatWelcome').style.display = 'none';
   document.getElementById('msgContainer').style.display = 'flex';
@@ -1357,9 +1608,60 @@ async function sendMessage() {
       }
     }
 
-    /* [v35 FIX] DRM 선처리 제거 — 회사 PC는 브라우저 단독(PowerShell 실행 불가)
-       Office 파일은 집 PC relay가 PowerShell Office XML 추출로 직접 처리.
-       DRM 보호 파일이면 relay가 추출 실패 → 자동으로 오류 메시지를 사용자에게 전달. */
+    /* [v37] STEP 1.5: DRM 파일 → Bridge COM 텍스트 추출 (회사 PC 내에서 완결)
+       DRM 원본은 Supabase에 임시 업로드 → Bridge가 다운로드 → Office COM 텍스트 추출
+       → 추출 텍스트만 브라우저로 반환 → DRM 원본 Supabase에서 즉시 삭제
+       → 집 PC에는 텍스트만 전달 (DRM 바이트 절대 전송 안 함) */
+    const drmAtts = savedAttachments.filter(a => a.type === 'drm-pending');
+    if (drmAtts.length > 0 && !bridgeOnline) {
+      toast('⚠️ Bridge 오프라인: DRM 변환 불가');
+      appendSystemMsg(chatId,
+        '⚠️ **DRM 파일 변환 불가**\n\n' +
+        drmAtts.map(a => '• ' + a.name).join('\n') +
+        '\n\nBridge가 오프라인 상태입니다. 회사 PC에서 Bridge(start-bridge.bat)가 실행 중이어야 DRM 보호 파일을 변환할 수 있습니다.');
+      setWaiting(false);
+      return;
+    }
+    for (let di = 0; di < drmAtts.length; di++) {
+      const att = drmAtts[di];
+      toast('🔐 DRM 변환 (' + (di+1) + '/' + drmAtts.length + '): ' + att.name);
+      try {
+        /* DRM 바이트를 Supabase에 임시 업로드 (Bridge가 다운로드 용) */
+        const base64 = att.data.split(',')[1];
+        const totalChunks = Math.ceil(base64.length / CHUNK_SIZE);
+        for (let ci = 0; ci < totalChunks; ci++) {
+          const chunkData = base64.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
+          await fetch(SUPA_URL + '/rest/v1/file_chunks', {
+            method: 'POST',
+            headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ message_id: msgId, file_name: att.name, chunk_index: ci, total_chunks: totalChunks, data: chunkData, file_size: att.size })
+          });
+        }
+        /* Bridge COM 텍스트 추출 실행 */
+        const drmResult = await triggerDrmTextExtract(msgId, att.name);
+        if (drmResult.ok && drmResult.text) {
+          extractedContent += '\n\n=== 첨부파일: ' + att.name + ' (DRM 변환) ===\n' + drmResult.text + '\n=== 끝 ===';
+          toast('✅ DRM 변환 완료: ' + att.name + ' (' + drmResult.text.length + '자)');
+        } else {
+          toast('❌ DRM 변환 실패: ' + (drmResult.error || drmResult.err || '알 수 없는 오류'));
+          appendSystemMsg(chatId,
+            '❌ **DRM 변환 실패**: ' + att.name + '\n\n' + (drmResult.error || drmResult.err || '') +
+            '\n\n**대안**: 회사 PC에서 해당 파일을 Office로 열어 "다른 이름으로 저장" → 보안 해제 후 다시 업로드');
+          setWaiting(false);
+          return;
+        }
+      } catch(drmErr) {
+        toast('❌ DRM 처리 오류: ' + drmErr.message);
+        /* DRM 청크 정리 (실패 시에도) */
+        try {
+          await fetch(SUPA_URL + '/rest/v1/file_chunks?message_id=eq.' + encodeURIComponent(msgId) + '&file_name=eq.' + encodeURIComponent(att.name), {
+            method: 'DELETE', headers: { 'apikey': SUPA_KEY, 'Authorization': 'Bearer ' + SUPA_KEY, 'Prefer': 'return=minimal' }
+          });
+        } catch(_) {}
+        setWaiting(false);
+        return;
+      }
+    }
 
 /* STEP 2: Insert message with file metadata */
     const messageData = {
@@ -1401,25 +1703,40 @@ async function handleFileInput(input) {
     } else if (['pptx','ppt'].includes(ext)) {
       const extracted = await extractPptxText(f);
       if (typeof extracted === 'string' && extracted.length > 0) {
-        // 브라우저에서 텍스트 추출 성공 → 텍스트만 전송 (업로드 없음)
         attachments.push({ type:'text-extracted', name:f.name, extractedText:extracted, size: f.size });
         toast('✅ ' + f.name + ' 텍스트 추출 완료');
       } else if (extracted && extracted.drm) {
-        // [v36] DRM 확정: 업로드하지 않고 즉시 사용자에게 명확한 안내
-        showDrmBlockedModal(f.name);
+        // [v37] DRM → Bridge COM 텍스트 추출 경로 (차단하지 않음)
+        try {
+          attachments.push({ type:'drm-pending', name:f.name, data: await readDataURL(f), size: f.size, drmReason: extracted.reason });
+          toast('🔐 DRM 감지: ' + f.name + ' → 전송 시 Bridge 자동 변환');
+        } catch(e2) { toast('읽기 실패: ' + f.name); }
       } else {
-        // 일반 PPTX (JSZip 미로드 등) → 바이트를 릴레이로 전송해서 집 PC가 추출
         try {
           attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
           toast('📄 ' + f.name + ' → 집 PC에서 추출 예정');
         } catch(e2) { toast('읽기 실패: ' + f.name); }
+      }
+    } else if (['docx','doc','xlsx','xls'].includes(ext)) {
+      // [v37] Word/Excel도 DRM 감지
+      const drmResult = await detectOfficeDrm(f);
+      if (drmResult && drmResult.drm) {
+        try {
+          attachments.push({ type:'drm-pending', name:f.name, data: await readDataURL(f), size: f.size, drmReason: drmResult.reason });
+          toast('🔐 DRM 감지: ' + f.name + ' → 전송 시 Bridge 자동 변환');
+        } catch(e2) { toast('읽기 실패: ' + f.name); }
+      } else {
+        try {
+          attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
+        } catch { toast('읽기 실패: ' + f.name); }
       }
     } else {
       try {
         attachments.push({ type:'file', name:f.name, data: await readDataURL(f), size: f.size });
       } catch {
         toast('읽기 실패: ' + f.name);
-      }    }
+      }
+    }
   }
   input.value = ''; renderAttachRow();
 }
@@ -1446,6 +1763,8 @@ function renderAttachRow() {
       ? `<div class="aprev"><img src="${a.data}" onclick="lightbox('${a.data}')"><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
       : a.type==='text-extracted'
       ? `<div class="aprev"><div class="fchip" style="background:#16a34a;color:#fff">✅<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
+      : a.type==='drm-pending'
+      ? `<div class="aprev"><div class="fchip" style="background:#d97706;color:#fff">🔐<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
       : `<div class="aprev"><div class="fchip">📄<span class="fn">${esc(a.name)}</span></div><button class="xbtn" onclick="rmAttach(${i})">×</button></div>`
   ).join('');
 }
