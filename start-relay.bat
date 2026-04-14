@@ -1,10 +1,10 @@
 @echo off
 chcp 65001 > nul
-title Remote Bridge Relay v34 - Self-Healing
+title Remote Bridge Relay v36 - Self-Healing
 color 0A
 
 echo ============================================================
-echo   Remote Bridge Relay Worker v34 자동 업데이트 시작
+echo   Remote Bridge Relay Worker v36 자동 업데이트 시작
 echo   집 PC에서 실행하세요
 echo ============================================================
 echo.
