@@ -1,6 +1,17 @@
 /**
- * Remote Bridge Relay Worker v37
+ * Remote Bridge Relay Worker v38
  * ======================================
+ * 변경사항 (v37 → v38):
+ * - [ARCH] DRM 파일 전체 전송 아키텍처:
+ *   회사 PC Bridge COM → ExportAsFixedFormat → PDF 전체 파일 Supabase 경유 전송
+ *   → relay가 실제 파일을 Claude CLI에 전달 (텍스트만이 아닌 전체 파일)
+ *   → Claude가 파일을 직접 분석/수정 → 결과 파일 자동 업로드 → 회사 PC 다운로드
+ * - [FEAT] 작업 디렉토리 시스템: 메시지별 input/output 디렉토리 생성
+ * - [FEAT] 결과 파일 자동 업로드: Claude가 output/에 저장한 파일 자동 감지 + Supabase 업로드
+ * - [FEAT] 파일 작업 시 Claude 타임아웃 5분으로 증가 (기본 2분)
+ * - [FEAT] 프롬프트에 파일 경로 포함 → Claude가 python-pptx 등으로 직접 파일 처리 가능
+ * - [FIX] 자동 디버깅 강화: 더 정확한 오류 진단 + 복구
+ *
  * 변경사항 (v36 → v37):
  * - [ARCH] DRM 텍스트 추출 경로 최적화:
  *   cowork-web.html이 DRM 감지 → Bridge COM 텍스트 직접 추출 → 텍스트만 relay 전달
@@ -34,15 +45,17 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v37';
+const VERSION   = 'v38';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
   pollInterval:         3000,
-  claudeTimeout:        120000,
+  claudeTimeout:        120000,              // 기본 2분 (텍스트 전용)
+  fileClaudeTimeout:    300000,              // v38: 파일 작업 시 5분
   heartbeatInterval:    15000,
   maxPromptLen:         8000,
-  bridgeExtractTimeout: 90000,
+  fileMaxPromptLen:     50000,               // v38: 파일 작업 시 50K
+  bridgeExtractTimeout: 180000,              // v38: 3분 (90s→180s)
   keepAliveInterval:    6 * 60 * 60 * 1000,  // 6h
   sysLogMaxRows:        500,
   startupRetries:       5,
@@ -728,6 +741,58 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
   return `[지원하지 않는 파일 형식: ${ext}]\n지원 형식: .pptx .ppt .docx .doc .xlsx .xls .pdf`;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// [v38] 작업 디렉토리 + 파일 업로드/스캔 유틸리티
+// ═══════════════════════════════════════════════════════════════════════════════
+function createWorkDir(msgId) {
+  const safeId = (msgId || 'unknown').replace(/[^a-zA-Z0-9\-_]/g, '').slice(0, 40);
+  const dir = path.join(os.tmpdir(), 'relay-work-' + safeId + '-' + Date.now());
+  const inputDir  = path.join(dir, 'input');
+  const outputDir = path.join(dir, 'output');
+  fs.mkdirSync(inputDir,  { recursive: true });
+  fs.mkdirSync(outputDir, { recursive: true });
+  return { dir, inputDir, outputDir };
+}
+
+function cleanupWorkDir(dir) {
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch(e) {
+    warn('[Cleanup] 작업 디렉토리 삭제 실패:', e.message);
+  }
+}
+
+function scanOutputDir(outputDir) {
+  try {
+    return fs.readdirSync(outputDir)
+      .filter(f => !f.startsWith('.') && !f.startsWith('_'))
+      .map(f => {
+        const fp = path.join(outputDir, f);
+        try { return { name: f, path: fp, size: fs.statSync(fp).size }; }
+        catch(e) { return null; }
+      })
+      .filter(f => f && f.size > 0);
+  } catch(e) { return []; }
+}
+
+async function uploadFileToChunks(responseId, fileName, filePath) {
+  const data = fs.readFileSync(filePath);
+  const b64 = data.toString('base64');
+  const CHUNK = 800 * 1024; // ~800KB per chunk (base64)
+  const total = Math.ceil(b64.length / CHUNK);
+  log('[Upload] 파일 업로드 시작:', fileName, data.length + 'B →', total, '청크');
+  for (let i = 0; i < total; i++) {
+    await dbInsert('file_chunks', {
+      message_id: responseId,
+      file_name:  fileName,
+      chunk_index: i,
+      total_chunks: total,
+      data: b64.slice(i * CHUNK, (i + 1) * CHUNK),
+      file_size: data.length
+    });
+  }
+  log('[Upload] 완료:', fileName, data.length + 'B');
+  return { name: fileName, size: data.length };
+}
+
 // ── Recover stuck messages ─────────────────────────────────────────────────────
 async function recoverStuckMessages(sinceMinutes) {
   try {
@@ -890,7 +955,8 @@ ${diagText}
 }
 
 // ── Run Claude ─────────────────────────────────────────────────────────────────
-function runClaude(prompt) {
+function runClaude(prompt, timeout) {
+  const effectiveTimeout = timeout || CONFIG.claudeTimeout;
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
     try {
@@ -900,7 +966,7 @@ function runClaude(prompt) {
       return;
     }
     const cmd = CLAUDE_EXE + ' --print < "' + tmpFile + '"';
-    log('[Claude] 실행:', cmd.slice(0, 80));
+    log('[Claude] 실행 (timeout:', effectiveTimeout / 1000 + 's):', cmd.slice(0, 80));
     const proc = spawn(cmd, [], { shell: true, env: process.env });
     let out = '', errText = '', settled = false;
     function done(fn) { if (!settled) { settled = true; clearTimeout(killTimer); fn(); } }
@@ -909,9 +975,9 @@ function runClaude(prompt) {
       try { proc.kill('SIGTERM'); } catch(e2) {}
       done(() => {
         try { fs.unlinkSync(tmpFile); } catch(e2) {}
-        reject(new Error('Claude CLI timeout (' + CONFIG.claudeTimeout / 1000 + 's) — 응답 없음'));
+        reject(new Error('Claude CLI timeout (' + effectiveTimeout / 1000 + 's) — 응답 없음'));
       });
-    }, CONFIG.claudeTimeout);
+    }, effectiveTimeout);
 
     proc.stdout.on('data', d => { out += d.toString(); });
     proc.stderr.on('data', d => { errText += d.toString(); });
@@ -937,7 +1003,8 @@ function runClaude(prompt) {
 }
 
 // ── Build prompt ───────────────────────────────────────────────────────────────
-async function buildPrompt(chatId, currentContent) {
+async function buildPrompt(chatId, currentContent, hasFiles = false) {
+  const maxLen = hasFiles ? CONFIG.fileMaxPromptLen : CONFIG.maxPromptLen;
   try {
     const rows = await dbSelect('messages',
       'chat_id=eq.' + encodeURIComponent(chatId) +
@@ -954,7 +1021,7 @@ async function buildPrompt(chatId, currentContent) {
       })
       .join('\n\n');
     const full = hist + '\n\nHuman: ' + currentContent;
-    return full.length > CONFIG.maxPromptLen ? 'Human: ' + currentContent : full;
+    return full.length > maxLen ? 'Human: ' + currentContent : full;
   } catch (e) {
     return currentContent;
   }
@@ -967,6 +1034,7 @@ async function processMessage(msg) {
   const id = msg.id, chat_id = msg.chat_id;
   let content = msg.content || '';
   let attachedFiles = [];
+  let workDir = null;  // [v38] 함수 스코프 — catch에서도 접근 가능
 
   log('[Worker] 처리 중:', id.slice(0, 8), '"' + content.slice(0, 50) + '"');
   sysLog('info', 'message_received', { id: id.slice(0, 8), preview: content.slice(0, 80) });
@@ -994,18 +1062,37 @@ async function processMessage(msg) {
   }
 
   try {
-    // 파일 다운로드
-    if (msg.files && Array.isArray(msg.files) && msg.files.length > 0) {
+    // [v38] 파일 다운로드 + 작업 디렉토리 생성
+    const hasFiles = msg.files && Array.isArray(msg.files) && msg.files.length > 0;
+
+    if (hasFiles) {
+      workDir = createWorkDir(id);
+      log('[Worker] 작업 디렉토리:', workDir.dir);
       log('[Worker] 파일 개수:', msg.files.length);
       for (const file of msg.files) {
         try {
           log('[Worker] 다운로드:', file.name);
           const buffer = await chunksDownload(id, file.name);
-          const tmpPath = path.join(os.tmpdir(), 'relay-chunk-' + Date.now() + '-' + file.name);
-          fs.writeFileSync(tmpPath, buffer);
-          attachedFiles.push({ name: file.name, path: tmpPath, buffer });
-          log('[Worker] 저장:', tmpPath, buffer.length + 'B',
-            isPdfBuffer(buffer) ? '[실제 PDF!]' : '');
+          const safeName = file.name.replace(/['"<>|?*]/g, '_');
+
+          // [v38] PDF 변환 파일 감지 (DRM PPTX → PDF로 변환된 경우)
+          const isPdf = isPdfBuffer(buffer);
+          const origExt = path.extname(safeName).toLowerCase();
+          const isConvertedPdf = isPdf && ['.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls'].includes(origExt);
+
+          if (isConvertedPdf) {
+            // DRM 변환된 PDF: 원본 이름.pdf로 저장
+            const pdfName = safeName + '.converted.pdf';
+            const pdfPath = path.join(workDir.inputDir, pdfName);
+            fs.writeFileSync(pdfPath, buffer);
+            attachedFiles.push({ name: pdfName, path: pdfPath, buffer, originalName: safeName, isConverted: true });
+            log('[Worker] DRM→PDF 변환 파일:', safeName, '→', pdfName, buffer.length + 'B');
+          } else {
+            const filePath = path.join(workDir.inputDir, safeName);
+            fs.writeFileSync(filePath, buffer);
+            attachedFiles.push({ name: safeName, path: filePath, buffer });
+            log('[Worker] 저장:', filePath, buffer.length + 'B', isPdf ? '[PDF]' : '');
+          }
         } catch (e) {
           err('[Worker] 파일 다운로드 실패:', file.name, e.message);
           sysLog('error', 'file_download_fail', { id: id.slice(0, 8), file: file.name, err: e.message.slice(0, 200) });
@@ -1013,64 +1100,121 @@ async function processMessage(msg) {
       }
     }
 
-    // 파일 텍스트 추출
+    // 파일 텍스트 추출 (참고용 — Claude에게 파일경로 + 텍스트 모두 제공)
     let fileContentText = '';
     let drmBlockedFiles = [];
     for (const file of attachedFiles) {
+      if (file.isConverted) continue; // 변환된 PDF는 원본에서 추출
       log('[Worker] 파일 추출:', file.name);
       const extractedText = await extractFileContent(id, file.name, file.path, file.buffer);
-      // [v36] DRM 감지 시 전용 섹션으로 분리
       const drmMatch = /^\[DRM_PROTECTED:(.+)\]$/.exec(extractedText);
       if (drmMatch) {
         drmBlockedFiles.push(drmMatch[1]);
       } else {
-        fileContentText += `\n\n=== 첨부파일: ${file.name} ===\n${extractedText}\n=== 끝 ===`;
+        fileContentText += `\n\n=== 첨부파일: ${file.originalName || file.name} ===\n${extractedText}\n=== 끝 ===`;
+      }
+    }
+    // [v38] 변환 PDF 파일 텍스트 추출 (DRM→PDF 경유)
+    for (const file of attachedFiles) {
+      if (!file.isConverted) continue;
+      log('[Worker] 변환 PDF 추출:', file.name, '(원본:', file.originalName + ')');
+      try {
+        const text = extractViaPdf(file.path);
+        if (text && text.length > 10) {
+          fileContentText += `\n\n=== 첨부파일: ${file.originalName} (DRM→PDF 변환) ===\n${text}\n=== 끝 ===`;
+          log('[Worker] 변환 PDF 텍스트 추출 성공:', text.length, '자');
+        }
+      } catch(e) {
+        warn('[Worker] 변환 PDF 텍스트 추출 실패:', e.message);
       }
     }
 
-    // [v36] DRM 파일이 있으면 Claude에게 명확한 시스템 지침 주입 → 환각 방지
+    // [v38] 파일 경로 정보 + 작업 지시 (Claude가 실제 파일로 작업할 수 있도록)
+    let filePathSection = '';
+    if (workDir && attachedFiles.length > 0) {
+      filePathSection = '\n\n[파일 경로 — 파일 분석/수정/생성이 필요하면 아래 경로의 파일을 직접 사용하세요]\n';
+      for (const f of attachedFiles) {
+        const label = f.isConverted
+          ? `${f.originalName} (DRM 보호 → PDF 변환됨)`
+          : f.name;
+        filePathSection += `• ${label}\n  경로: ${f.path}\n  크기: ${(f.buffer || {}).length || 0} bytes\n`;
+      }
+      filePathSection += `\n결과물 저장 경로: ${workDir.outputDir}/\n`;
+      filePathSection += '(파일을 수정하거나 새로 생성한 경우, 위 경로에 결과물을 저장하면 사용자에게 자동 전달됩니다)\n';
+      filePathSection += '(python-pptx, openpyxl, python-docx 등 라이브러리 사용 가능. 필요시 pip install 먼저 실행)\n';
+    }
+
+    // DRM 차단 파일 지침 (Bridge 경유 변환도 실패한 경우)
     let systemDirective = '';
     if (drmBlockedFiles.length > 0) {
       systemDirective =
         '\n\n[시스템 지침 — 반드시 따를 것]\n' +
         '사용자가 첨부한 다음 파일은 DRM(문서보안)으로 암호화되어 있어 내용을 읽을 수 없습니다:\n' +
         drmBlockedFiles.map(f => '• ' + f).join('\n') + '\n\n' +
-        '사용자에게 다음 내용 그대로 안내하세요. 파일 경로나 폴더 권한에 대해 언급하지 마세요:\n' +
-        '──────────────────────────\n' +
-        '❌ 첨부하신 파일은 회사 문서보안(DRM)으로 암호화되어 있어 읽을 수 없습니다.\n\n' +
-        '📌 해결 방법 (택 1):\n' +
-        '1. **PowerPoint에서 열기 → 다른 이름으로 저장** → 파일 형식 "PowerPoint 프레젠테이션(*.pptx)"으로 저장 → 보안 해제된 파일을 업로드\n' +
-        '2. **내용 복사하여 붙여넣기**: PPT 내용을 선택하고 Ctrl+C → 이 채팅창에 Ctrl+V\n' +
-        '3. **화면 캡처 후 업로드**: 슬라이드를 캡처해서 이미지로 업로드 (이미지는 DRM 대상 아님)\n' +
-        '──────────────────────────\n';
+        '사용자에게 다음 내용 그대로 안내하세요:\n' +
+        '❌ 첨부하신 파일은 회사 문서보안(DRM)으로 암호화되어 있어 읽을 수 없습니다.\n' +
+        '📌 해결: 회사 PC에서 Bridge(start-bridge.bat)를 실행한 상태에서 다시 보내주세요.\n' +
+        '(Bridge가 DRM 파일을 자동으로 변환하여 전달합니다)\n';
     }
 
-    const finalContent = content + fileContentText + systemDirective;
-    const prompt = await buildPrompt(chat_id, finalContent);
-    log('[Worker] 프롬프트 길이:', prompt.length);
+    const finalContent = content + fileContentText + filePathSection + systemDirective;
+    const prompt = await buildPrompt(chat_id, finalContent, hasFiles);
+    log('[Worker] 프롬프트 길이:', prompt.length, hasFiles ? '(파일 모드)' : '');
 
-    const response = await runClaude(prompt);
+    const claudeTimeout = hasFiles ? CONFIG.fileClaudeTimeout : CONFIG.claudeTimeout;
+    const response = await runClaude(prompt, claudeTimeout);
     log('[Worker] 응답 수신:', response.slice(0, 60));
+
+    // [v38] 출력 파일 스캔 + 업로드
+    let outputFiles = [];
+    if (workDir) {
+      outputFiles = scanOutputDir(workDir.outputDir);
+      if (outputFiles.length > 0) {
+        log('[Worker] 출력 파일 발견:', outputFiles.length, '개');
+        outputFiles.forEach(f => log('  →', f.name, f.size + 'B'));
+      }
+    }
 
     const rid = (typeof crypto.randomUUID === 'function')
       ? crypto.randomUUID()
       : 'resp-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
 
+    // [v38] 출력 파일 Supabase 업로드
+    let responseFiles = null;
+    if (outputFiles.length > 0) {
+      responseFiles = [];
+      for (const outFile of outputFiles) {
+        try {
+          const ref = await uploadFileToChunks(rid, outFile.name, outFile.path);
+          responseFiles.push(ref);
+          sysLog('info', 'output_file_uploaded', { responseId: rid.slice(0, 8), name: outFile.name, size: outFile.size });
+        } catch(e) {
+          err('[Worker] 출력 파일 업로드 실패:', outFile.name, e.message);
+          sysLog('error', 'output_upload_fail', { name: outFile.name, err: e.message.slice(0, 200) });
+        }
+      }
+      if (responseFiles.length === 0) responseFiles = null;
+    }
+
     await dbInsert('messages', {
       id: rid, chat_id, role: 'assistant',
       content: response, status: 'completed',
-      files: null, created_at: new Date().toISOString(),
+      files: responseFiles, created_at: new Date().toISOString(),
     });
 
     try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
-    sysLog('info', 'message_completed', { id: id.slice(0, 8), responseId: rid.slice(0, 8), files: attachedFiles.length });
-    log('[Worker] 완료 →', rid.slice(0, 8));
+    sysLog('info', 'message_completed', {
+      id: id.slice(0, 8), responseId: rid.slice(0, 8),
+      files: attachedFiles.length, outputFiles: outputFiles.length
+    });
+    log('[Worker] 완료 →', rid.slice(0, 8), outputFiles.length > 0 ? '(출력 파일 ' + outputFiles.length + '개)' : '');
 
     // 정리
     for (const file of attachedFiles) { try { fs.unlinkSync(file.path); } catch(e) {} }
     if (msg.files && msg.files.length > 0) {
       try { await dbDelete('file_chunks', 'message_id=eq.' + encodeURIComponent(id)); } catch(e) {}
     }
+    if (workDir) cleanupWorkDir(workDir.dir);
 
   } catch (procErr) {
     err('[Worker] 처리 오류:', procErr.message);
@@ -1102,6 +1246,7 @@ async function processMessage(msg) {
 
     try { await dbUpdate('messages', 'id=eq.' + encodeURIComponent(id), { status: 'completed' }); } catch(e) {}
     for (const file of attachedFiles) { try { fs.unlinkSync(file.path); } catch(e) {} }
+    if (workDir) cleanupWorkDir(workDir.dir);  // [v38] 에러 시에도 작업 디렉토리 정리
   }
 
   // 임시 메시지 항상 삭제 (finally 역할)
