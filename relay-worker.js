@@ -1,6 +1,15 @@
 /**
- * Remote Bridge Relay Worker v38
+ * Remote Bridge Relay Worker v39
  * ======================================
+ * 변경사항 (v38 → v39):
+ * - [FEAT] DRM PPTX 슬라이드 이미지 추출: Bridge COM → Slide.Export(PNG) → Supabase
+ *   → PDF 텍스트 대신 슬라이드별 PNG 이미지로 전달 → Claude가 이미지 직접 분석
+ *   → 서식/차트/이미지/표 레이아웃 등 시각 정보 완전 보존
+ * - [FEAT] extractViaBridgeSlideImages(): PPTX → PNG 슬라이드 추출 Bridge 함수
+ * - [ARCH] DRM 처리 우선순위:
+ *   PPTX → Method 3-B (슬라이드 이미지) → Method 3-A (PDF fallback)
+ *   DOCX/XLSX → Method 3-A (PDF) 유지
+ *
  * 변경사항 (v37 → v38):
  * - [ARCH] DRM 파일 전체 전송 아키텍처:
  *   회사 PC Bridge COM → ExportAsFixedFormat → PDF 전체 파일 Supabase 경유 전송
@@ -45,7 +54,7 @@ const path     = require('path');
 const SUPA_HOST = 'rnnigyfzwlgojxyccgsm.supabase.co';
 const SUPA_URL  = 'https://' + SUPA_HOST;
 const SUPA_KEY  = 'sb_publishable_Nmv51BZccADB0bN5JY2URw_lLffyFgE';
-const VERSION   = 'v38';
+const VERSION   = 'v39';
 const LOCK_FILE = path.join(os.tmpdir(), 'relay-worker.lock');
 
 const CONFIG = {
@@ -590,8 +599,142 @@ async function extractViaBridgeCOMDirect(messageId, fileName) {
   throw new Error(`Bridge 응답 없음 (${CONFIG.bridgeExtractTimeout / 1000}초)`);
 }
 
+// ── Bridge: DRM PPTX → Slide PNGs → Supabase ──────────────────────────────────
+/**
+ * [v39] DRM PPTX 슬라이드를 PNG 이미지로 내보내기
+ * Bridge COM: Presentation.Slides[i].Export(path, "PNG", 1920, 1080)
+ * 각 PNG를 Supabase file_chunks에 업로드 (message_id = `${messageId}-slides`)
+ * 반환: 슬라이드 수 (number)
+ */
+async function extractViaBridgeSlideImages(messageId, fileName) {
+  const ext = path.extname(fileName).toLowerCase();
+  const safeName = fileName.replace(/'/g, "''");
+  const slidesPrefix = messageId + '-slides';
+
+  const lines = [
+    `$supaUrl = '${SUPA_URL}'`,
+    `$supaKey = '${SUPA_KEY}'`,
+    `$msgId = '${messageId}'`,
+    `$slidesPrefix = '${slidesPrefix}'`,
+    `$fileName = '${safeName}'`,
+    `$ext = '${ext}'`,
+    '$hdr = @{ apikey = $supaKey; Authorization = "Bearer $supaKey" }',
+    '',
+    // ── 1. Supabase에서 DRM 파일 다운로드
+    '$uri = $supaUrl + "/rest/v1/file_chunks" +',
+    '  "?message_id=eq." + [uri]::EscapeDataString($msgId) +',
+    '  "&file_name=eq." + [uri]::EscapeDataString($fileName) +',
+    '  "&order=chunk_index.asc&select=chunk_index,data"',
+    'try { $chunks = Invoke-RestMethod -Uri $uri -Headers $hdr -Method Get }',
+    'catch { Write-Output ("FAIL:download:" + $_.Exception.Message); return }',
+    'if (-not $chunks -or $chunks.Count -eq 0) { Write-Output "FAIL:no_chunks"; return }',
+    '$b64 = ($chunks | Sort-Object chunk_index | ForEach-Object { $_.data }) -join ""',
+    '$bytes = [Convert]::FromBase64String($b64)',
+    '$ts = Get-Date -f "yyyyMMddHHmmssfff"',
+    '$tmpF   = [IO.Path]::Combine($env:TEMP, "bridge-src-" + $ts + $ext)',
+    '$tmpDir = [IO.Path]::Combine($env:TEMP, "bridge-slides-" + $ts)',
+    '[IO.Directory]::CreateDirectory($tmpDir) | Out-Null',
+    '[IO.File]::WriteAllBytes($tmpF, $bytes)',
+    '',
+    // ── 2. PowerPoint COM으로 열어서 슬라이드별 PNG 내보내기
+    '$comJob = Start-Job -ScriptBlock {',
+    '  param($tmpF, $tmpDir)',
+    '  try {',
+    '    Stop-Process -Name POWERPNT -Force -EA 0',
+    '    $app = New-Object -ComObject PowerPoint.Application',
+    '    $app.Visible = 1',
+    '    Start-Sleep 8',
+    '    $pres = $app.Presentations.Open($tmpF, 0, 0, 1)',
+    '    $count = $pres.Slides.Count',
+    '    for ($i = 1; $i -le $count; $i++) {',
+    '      $slideFile = [IO.Path]::Combine($tmpDir, ("slide_{0:D3}.png" -f $i))',
+    '      $pres.Slides[$i].Export($slideFile, "PNG", 1920, 1080)',
+    '    }',
+    '    $pres.Close(); $app.Quit()',
+    '    Write-Output ("OK:" + $count)',
+    '  } catch { Write-Output ("FAIL:COM:" + $_.Exception.Message) }',
+    '  finally { Remove-Item $tmpF -EA 0 }',
+    '} -ArgumentList $tmpF, $tmpDir',
+    '',
+    '$comWait = 0; $maxWait = 180',
+    'while ($comJob.State -eq "Running" -and $comWait -lt $maxWait) { Start-Sleep 2; $comWait += 2 }',
+    'if ($comJob.State -ne "Completed") {',
+    '  Stop-Job $comJob -EA 0; Remove-Job $comJob -EA 0',
+    '  Remove-Item $tmpDir -Recurse -EA 0',
+    '  Write-Output "COM_TIMEOUT"; return',
+    '}',
+    '$comOut = Receive-Job $comJob 2>&1 | Out-String; Remove-Job $comJob -EA 0',
+    'if (-not $comOut.Trim().StartsWith("OK:")) {',
+    '  Remove-Item $tmpDir -Recurse -EA 0',
+    '  Write-Output ("FAIL:COM:" + $comOut.Trim()); return',
+    '}',
+    '$slideCount = [int]($comOut.Trim().Split(":")[1])',
+    '',
+    // ── 3. 각 PNG를 Supabase에 업로드 (900KB 청크)
+    '$insHdr = $hdr + @{ "Content-Type" = "application/json"; "Prefer" = "return=minimal" }',
+    '$chunkSize = 900 * 1024',
+    'for ($i = 1; $i -le $slideCount; $i++) {',
+    '  $slideFile = [IO.Path]::Combine($tmpDir, ("slide_{0:D3}.png" -f $i))',
+    '  if (-not (Test-Path $slideFile)) { continue }',
+    '  $pngBytes = [IO.File]::ReadAllBytes($slideFile)',
+    '  $b64Png = [Convert]::ToBase64String($pngBytes)',
+    '  $slideName = "slide_{0:D3}.png" -f $i',
+    '  $totalLen = $b64Png.Length',
+    '  $totalChunks = [Math]::Ceiling($totalLen / $chunkSize)',
+    '  # 기존 청크 삭제',
+    '  $delUri = $supaUrl + "/rest/v1/file_chunks?message_id=eq." + [uri]::EscapeDataString($slidesPrefix) + "&file_name=eq." + [uri]::EscapeDataString($slideName)',
+    '  try { Invoke-RestMethod -Uri $delUri -Headers $hdr -Method Delete } catch {}',
+    '  for ($c = 0; $c -lt $totalChunks; $c++) {',
+    '    $start  = $c * $chunkSize',
+    '    $length = [Math]::Min($chunkSize, $totalLen - $start)',
+    '    $chunkData = $b64Png.Substring($start, $length)',
+    '    $body = @{ message_id=$slidesPrefix; file_name=$slideName; chunk_index=$c; total_chunks=$totalChunks; data=$chunkData } | ConvertTo-Json -Depth 2 -Compress',
+    '    try { Invoke-RestMethod -Uri ($supaUrl + "/rest/v1/file_chunks") -Headers $insHdr -Method Post -Body $body | Out-Null }',
+    '    catch { Write-Output ("FAIL:upload slide ${i} chunk ${c}: " + $_.Exception.Message); Remove-Item $tmpDir -Recurse -EA 0; return }',
+    '  }',
+    '}',
+    'Remove-Item $tmpDir -Recurse -EA 0',
+    'Write-Output ("OK:SLIDES:" + $slideCount)',
+  ];
+
+  const psScript = lines.join('\n');
+  const cmdId = 'relay-slides-' + Date.now() + '-' + Math.random().toString(36).slice(2, 5);
+
+  sysLog('info', 'drm_slides_start', { messageId: messageId.slice(0, 8), fileName, cmdId });
+  await dbInsert('commands', {
+    id: cmdId, action: 'run_ps', target: '', content: psScript, status: 'pending',
+  });
+  log('[Bridge] 슬라이드 이미지 요청:', fileName, '→ cmd:', cmdId);
+
+  const deadline = Date.now() + CONFIG.bridgeExtractTimeout;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 2000));
+    const rows = await dbSelect('commands', `id=eq.${encodeURIComponent(cmdId)}&select=status,result`);
+    if (rows && rows.length) {
+      const row = rows[0];
+      if (row.status === 'completed' || row.status === 'error') {
+        try { await dbDelete('commands', `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
+        const result = (row.result || '').trim();
+        if (result === 'COM_TIMEOUT') throw new Error('슬라이드 내보내기 COM 타임아웃 (180초)');
+        if (result.startsWith('OK:SLIDES:')) {
+          const count = parseInt(result.split(':')[2]) || 0;
+          log('[Bridge] 슬라이드 이미지 업로드 완료:', count, '장');
+          sysLog('info', 'drm_slides_done', { messageId: messageId.slice(0, 8), count });
+          return count;
+        }
+        const errMsg = result.startsWith('FAIL:') ? result.slice(5) : result;
+        sysLog('error', 'drm_slides_fail', { messageId: messageId.slice(0, 8), err: errMsg.slice(0, 200) });
+        throw new Error('슬라이드 이미지 추출 실패: ' + errMsg.slice(0, 200));
+      }
+    }
+  }
+  try { await dbDelete('commands', `id=eq.${encodeURIComponent(cmdId)}`); } catch(e) {}
+  sysLog('error', 'drm_slides_timeout', { messageId: messageId.slice(0, 8) });
+  throw new Error(`슬라이드 이미지 Bridge 응답 없음 (${CONFIG.bridgeExtractTimeout / 1000}초)`);
+}
+
 // ── Main extraction — Method 0 우선순위 ────────────────────────────────────────
-async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
+async function extractFileContent(messageId, fileName, filePath, fileBuffer, workDir) {
   const ext = path.extname(fileName).toLowerCase();
   const isPptx   = ['.pptx', '.ppt'].includes(ext);
   const isDocx   = ['.docx', '.doc'].includes(ext);
@@ -684,15 +827,66 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
       }
     }
 
-    // ── Method 3: Bridge DRM (회사 PC Office COM → PDF → 텍스트) ──────────────
-    // 사용자의 공식 아키텍처: 회사 PC의 정품 Office로 DRM 파일을 열어
-    // DRM이 해제된 PDF로 저장 → 집 PC가 PDF 텍스트 추출
-    // DRM 감지됐거나 Methods 1~2 모두 실패 시 실행 (Bridge 온라인일 때만)
+    // ── Method 3-B: Bridge DRM PPTX → 슬라이드 PNG 이미지 (v39 신규, PPTX 전용) ──
+    // 서식/차트/이미지/표 레이아웃 등 시각 정보 완전 보존
+    if (isPptx && (errors.drmDetected || errors.markitdown)) {
+      const bridgeOnline = await checkBridgeOnline();
+      if (bridgeOnline) {
+        try {
+          log('[Extract] Method 3-B: Bridge 슬라이드 이미지 (PNG) -', fileName);
+          const slideCount = await extractViaBridgeSlideImages(messageId, fileName);
+          if (slideCount > 0 && workDir) {
+            // Supabase에서 PNG 파일 다운로드 → workDir에 저장
+            const slidesPrefix = messageId + '-slides';
+            const savedPaths = [];
+            for (let i = 1; i <= slideCount; i++) {
+              const slideName = `slide_${String(i).padStart(3, '0')}.png`;
+              try {
+                const buf = await chunksDownload(slidesPrefix, slideName);
+                const savePath = path.join(workDir.inputDir, slideName);
+                fs.writeFileSync(savePath, buf);
+                savedPaths.push({ name: slideName, path: savePath });
+                // Supabase 청크 정리
+                try {
+                  await dbDelete('file_chunks',
+                    `message_id=eq.${encodeURIComponent(slidesPrefix)}&file_name=eq.${encodeURIComponent(slideName)}`);
+                } catch(_) {}
+              } catch(e2) {
+                warn('[Extract] 슬라이드 다운로드 실패:', slideName, e2.message);
+              }
+            }
+            if (savedPaths.length > 0) {
+              log('[Extract] Method 3-B 성공 ✓ -', savedPaths.length, '장의 슬라이드 이미지');
+              sysLog('info', 'drm_slides_saved', { fileName, count: savedPaths.length });
+              // 특수 마커 반환: processMessage에서 이미지 경로를 프롬프트에 포함
+              return `[SLIDE_IMAGES:${savedPaths.length}:${savedPaths.map(p => p.path).join('|')}]`;
+            }
+          } else if (slideCount > 0) {
+            // workDir 없으면 Supabase 정리만 하고 PDF fallback
+            const slidesPrefix = messageId + '-slides';
+            for (let i = 1; i <= slideCount; i++) {
+              const slideName = `slide_${String(i).padStart(3, '0')}.png`;
+              try {
+                await dbDelete('file_chunks',
+                  `message_id=eq.${encodeURIComponent(slidesPrefix)}&file_name=eq.${encodeURIComponent(slideName)}`);
+              } catch(_) {}
+            }
+          }
+        } catch(e) {
+          errors.bridgeSlides = e.message.slice(0, 200);
+          warn('[Extract] Method 3-B 실패 (PDF로 fallback):', errors.bridgeSlides);
+          sysLog('warn', 'bridge_slides_fail', { fileName, err: errors.bridgeSlides });
+        }
+      }
+    }
+
+    // ── Method 3-A: Bridge DRM (회사 PC Office COM → PDF → 텍스트) ─────────────
+    // DOCX/XLSX 또는 Method 3-B 실패 시 사용
     if (errors.drmDetected || (errors.markitdown && (errors.pythonPptx || !isPptx))) {
       const bridgeOnline = await checkBridgeOnline();
       if (bridgeOnline) {
         try {
-          log('[Extract] Method 3: Bridge DRM (Office COM → PDF) -', fileName);
+          log('[Extract] Method 3-A: Bridge DRM (Office COM → PDF) -', fileName);
           const uploadedPdfName = await extractViaBridgeCOMDirect(messageId, fileName);
           const pdfBuffer = await chunksDownload(messageId, uploadedPdfName);
           const pdfPath = path.join(os.tmpdir(), 'relay-drm-' + Date.now() + '.pdf');
@@ -700,7 +894,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
           try {
             const text = extractViaPdf(pdfPath);
             if (text && text.length > 10) {
-              log('[Extract] Method 3 성공 ✓ (DRM 우회)');
+              log('[Extract] Method 3-A 성공 ✓ (DRM 우회)');
               sysLog('info', 'drm_bypass_success', { fileName, textLen: text.length });
               try {
                 await dbDelete('file_chunks',
@@ -713,7 +907,7 @@ async function extractFileContent(messageId, fileName, filePath, fileBuffer) {
           }
         } catch(e) {
           errors.bridgeDrm = e.message.slice(0, 200);
-          err('[Extract] Method 3 실패:', errors.bridgeDrm);
+          err('[Extract] Method 3-A 실패:', errors.bridgeDrm);
           sysLog('error', 'bridge_drm_fail', { fileName, err: errors.bridgeDrm });
         }
       } else {
@@ -1103,12 +1297,20 @@ async function processMessage(msg) {
     // 파일 텍스트 추출 (참고용 — Claude에게 파일경로 + 텍스트 모두 제공)
     let fileContentText = '';
     let drmBlockedFiles = [];
+    let slideImageSections = [];  // [v39] 슬라이드 이미지 경로 섹션
     for (const file of attachedFiles) {
       if (file.isConverted) continue; // 변환된 PDF는 원본에서 추출
       log('[Worker] 파일 추출:', file.name);
-      const extractedText = await extractFileContent(id, file.name, file.path, file.buffer);
+      const extractedText = await extractFileContent(id, file.name, file.path, file.buffer, workDir);
       const drmMatch = /^\[DRM_PROTECTED:(.+)\]$/.exec(extractedText);
-      if (drmMatch) {
+      // [v39] 슬라이드 이미지 마커 처리
+      const slideMatch = /^\[SLIDE_IMAGES:(\d+):(.+)\]$/.exec(extractedText);
+      if (slideMatch) {
+        const count = parseInt(slideMatch[1]);
+        const paths = slideMatch[2].split('|');
+        slideImageSections.push({ originalName: file.originalName || file.name, count, paths });
+        log('[Worker] 슬라이드 이미지 처리:', file.name, count + '장');
+      } else if (drmMatch) {
         drmBlockedFiles.push(drmMatch[1]);
       } else {
         fileContentText += `\n\n=== 첨부파일: ${file.originalName || file.name} ===\n${extractedText}\n=== 끝 ===`;
@@ -1127,6 +1329,20 @@ async function processMessage(msg) {
       } catch(e) {
         warn('[Worker] 변환 PDF 텍스트 추출 실패:', e.message);
       }
+    }
+
+    // [v39] 슬라이드 이미지 섹션 (DRM PPTX → PNG)
+    let slideImagesSection = '';
+    if (slideImageSections.length > 0) {
+      slideImagesSection = '\n\n[DRM 슬라이드 이미지 — Read 도구로 각 이미지를 열어서 내용을 파악하세요]\n';
+      for (const s of slideImageSections) {
+        slideImagesSection += `\n📊 ${s.originalName} (총 ${s.count}장의 슬라이드 이미지)\n`;
+        for (const p of s.paths) {
+          slideImagesSection += `  • ${path.basename(p)}: ${p}\n`;
+        }
+      }
+      slideImagesSection += '\n(각 슬라이드 PNG 파일을 Read 도구로 열어 시각적으로 분석하세요)\n';
+      slideImagesSection += '(서식, 차트, 표, 이미지 등 모든 시각 정보가 포함되어 있습니다)\n';
     }
 
     // [v38] 파일 경로 정보 + 작업 지시 (Claude가 실제 파일로 작업할 수 있도록)
@@ -1157,7 +1373,7 @@ async function processMessage(msg) {
         '(Bridge가 DRM 파일을 자동으로 변환하여 전달합니다)\n';
     }
 
-    const finalContent = content + fileContentText + filePathSection + systemDirective;
+    const finalContent = content + fileContentText + slideImagesSection + filePathSection + systemDirective;
     const prompt = await buildPrompt(chat_id, finalContent, hasFiles);
     log('[Worker] 프롬프트 길이:', prompt.length, hasFiles ? '(파일 모드)' : '');
 
