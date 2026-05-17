@@ -1,0 +1,27 @@
+{
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+    "allow": [
+      "Bash(node scripts/dispatch.mjs:*)",
+      "Bash(node scripts/sessions.mjs)",
+      "Bash(node scripts/new-session.mjs:*)",
+      "Bash(node scripts/status.mjs:*)",
+      "Bash(node scripts/logs.mjs:*)",
+      "Bash(node scripts/cancel.mjs:*)",
+      "Bash(bash .claude/hooks/session-start.sh)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/session-start.sh" }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "DISPATCH_TARGET": "mac-mini"
+  }
+}

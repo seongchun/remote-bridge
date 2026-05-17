@@ -1,0 +1,16 @@
+{
+  "name": "victus-dispatch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "dispatch": "node scripts/dispatch.mjs",
+    "sessions": "node scripts/sessions.mjs",
+    "new-session": "node scripts/new-session.mjs",
+    "status": "node scripts/status.mjs",
+    "logs": "node scripts/logs.mjs",
+    "cancel": "node scripts/cancel.mjs",
+    "relay": "node relay/relay.mjs"
+  }
+}
