@@ -1,6 +1,6 @@
 ---
 description: Send a task to Victus's Claude CLI in a workspace session.
-argument-hint: [--session <name>] [--fresh] [--timeout <sec>] -- <task>
+argument-hint: [--resume <session-id> | --session <name>] [--fresh] [--timeout <sec>] -- <task>
 allowed-tools: Bash(node scripts/dispatch.mjs:*)
 ---
 

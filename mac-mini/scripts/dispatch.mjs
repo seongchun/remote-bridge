@@ -1,10 +1,17 @@
 #!/usr/bin/env node
-// Send a task to the Mac Mini's Claude CLI in a specific workspace session.
+// Send a task to the Mac Mini's Claude CLI.
 //
-// Usage: node scripts/dispatch.mjs --session <name> [--fresh] [--timeout <sec>] -- <task...>
-//   or:  node scripts/dispatch.mjs <task...>     (uses session=default)
+// Two modes:
+//   Resume mode:    --resume <session-id|prefix>           (resumes a real Claude conversation)
+//   Workspace mode: [--session <name>] [--fresh]           (legacy; runs in workspace dir)
 //
-// --fresh   start a brand-new claude conversation in the workspace (default: --continue)
+// Usage:
+//   node scripts/dispatch.mjs --resume <id> [--timeout <sec>] -- <task...>
+//   node scripts/dispatch.mjs --session <name> [--fresh] [--timeout <sec>] -- <task...>
+//   node scripts/dispatch.mjs <task...>                     (session=default)
+//
+// --fresh   workspace mode only: start a brand-new claude conversation (default: --continue)
+// --resume  resume a specific Claude session by id (or unique prefix from /sessions)
 // --timeout per-call timeout override (seconds)
 // Anything after `--` (or all non-flag args) is the task text.
 
@@ -14,7 +21,7 @@ import { makeClient } from './lib/supa.mjs';
 import { buildPayload } from './lib/hmac.mjs';
 
 function parseArgs(argv) {
-  const o = { session: 'default', fresh: false, timeoutMs: null, task: '' };
+  const o = { session: 'default', sessionId: null, fresh: false, timeoutMs: null, task: '' };
   const taskParts = [];
   let collectingTask = false;
   for (let i = 0; i < argv.length; i++) {
@@ -27,12 +34,16 @@ function parseArgs(argv) {
       collectingTask = true;
     } else if (a === '--session' || a === '-s') {
       o.session = argv[++i];
+    } else if (a === '--resume' || a === '-r') {
+      o.sessionId = argv[++i];
     } else if (a === '--fresh' || a === '-f') {
       o.fresh = true;
     } else if (a === '--timeout' || a === '-t') {
       o.timeoutMs = parseInt(argv[++i], 10) * 1000;
     } else if (a.startsWith('--session=')) {
       o.session = a.slice(10);
+    } else if (a.startsWith('--resume=')) {
+      o.sessionId = a.slice(9);
     } else {
       taskParts.push(a);
     }
@@ -45,21 +56,28 @@ async function main() {
   const cfg = loadCloud();
   const args = parseArgs(process.argv.slice(2));
   if (!args.task) {
-    console.error('Usage: dispatch.mjs [--session <name>] [--fresh] [--timeout <sec>] -- <task>');
+    console.error('Usage: dispatch.mjs [--resume <id> | --session <name>] [--fresh] [--timeout <sec>] -- <task>');
     process.exit(64);
   }
   const timeoutMs = args.timeoutMs || cfg.timeoutMs;
 
   const db = makeClient(cfg);
   const payload = buildPayload(
-    { action: 'run_claude', task: args.task, session: args.session, fresh: args.fresh },
+    {
+      action: 'run_claude',
+      task: args.task,
+      session: args.session,
+      session_id: args.sessionId,
+      fresh: args.fresh,
+    },
     cfg.secret
   );
   const id = 'disp-' + Date.now() + '-' + randomBytes(4).toString('hex');
 
-  process.stderr.write(
-    `[dispatch] id=${id} target=${cfg.target} session=${args.session}${args.fresh ? ' (fresh)' : ''}\n`
-  );
+  const targetDesc = args.sessionId
+    ? `resume=${args.sessionId}`
+    : `session=${args.session}${args.fresh ? ' (fresh)' : ''}`;
+  process.stderr.write(`[dispatch] id=${id} target=${cfg.target} ${targetDesc}\n`);
 
   await db.insert('commands', {
     id,

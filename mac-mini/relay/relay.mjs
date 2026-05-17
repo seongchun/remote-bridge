@@ -3,9 +3,12 @@
 // verifies HMAC, then performs the requested action. Cross-platform (Node only).
 //
 // Actions:
-//   run_claude     — spawn `claude --print [--continue]` in resolved workspace dir
-//   list_sessions  — list subdirectories of WORKSPACE_ROOT
-//   new_session    — mkdir a new subdirectory under WORKSPACE_ROOT
+//   run_claude     — spawn `claude --print --dangerously-skip-permissions`.
+//                    With payload.session_id, resumes that real Claude session
+//                    (looks up its cwd from ~/.claude/projects/<encoded>/<id>.jsonl).
+//                    Without, falls back to workspace-dir mode using payload.session.
+//   list_sessions  — enumerate real Claude conversations from ~/.claude/projects/*.jsonl
+//   new_session    — mkdir a new subdirectory under WORKSPACE_ROOT (workspace-mode only)
 //   heartbeat      — implicit, emitted by us every 15s
 //
 // Designed to run under launchd (macOS) or NSSM/Task Scheduler (Windows).
@@ -150,15 +153,82 @@ async function cleanupSysLog() {
   } catch {}
 }
 
+// ── helpers: real Claude session discovery ────────────────────────────────────
+const CLAUDE_PROJECTS_DIR = path.join(os.homedir(), '.claude', 'projects');
+
+function readSessionMeta(jsonlPath) {
+  let cwd = null;
+  let firstUserMsg = '';
+  try {
+    const text = fs.readFileSync(jsonlPath, 'utf8');
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let obj;
+      try { obj = JSON.parse(line); } catch { continue; }
+      if (!cwd && typeof obj.cwd === 'string') cwd = obj.cwd;
+      if (!firstUserMsg && obj.type === 'user' && obj.message) {
+        const c = obj.message.content;
+        if (typeof c === 'string') firstUserMsg = c;
+        else if (Array.isArray(c)) {
+          const t = c.find((x) => x && typeof x.text === 'string');
+          if (t) firstUserMsg = t.text;
+        }
+      }
+      if (cwd && firstUserMsg) break;
+    }
+  } catch {}
+  return { cwd, firstUserMsg: firstUserMsg.replace(/\s+/g, ' ').trim().slice(0, 80) };
+}
+
+// Resolve an exact session-id OR a unique prefix to { sessionId, cwd, jsonlPath }.
+// On prefix collision picks the most recently modified match.
+function findSessionInfo(sessionIdOrPrefix) {
+  if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) return null;
+  const matches = [];
+  for (const projDir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+    const dirPath = path.join(CLAUDE_PROJECTS_DIR, projDir);
+    let entries;
+    try { entries = fs.readdirSync(dirPath); } catch { continue; }
+    for (const file of entries) {
+      if (!file.endsWith('.jsonl')) continue;
+      const sid = file.replace(/\.jsonl$/, '');
+      if (sid === sessionIdOrPrefix || sid.startsWith(sessionIdOrPrefix)) {
+        const full = path.join(dirPath, file);
+        let mtime = 0;
+        try { mtime = fs.statSync(full).mtimeMs; } catch {}
+        matches.push({ sid, full, mtime });
+      }
+    }
+  }
+  if (!matches.length) return null;
+  matches.sort((a, b) => b.mtime - a.mtime);
+  const pick = matches[0];
+  const meta = readSessionMeta(pick.full);
+  return { sessionId: pick.sid, cwd: meta.cwd, jsonlPath: pick.full };
+}
+
 // ── action: run_claude ────────────────────────────────────────────────────────
-function runClaude(prompt, cwd, dispatchId, fresh) {
+// opts: { mode: 'resume'|'workspace', sessionId?, cwd, fresh? }
+function runClaude(prompt, opts, dispatchId) {
   return new Promise((resolve, reject) => {
     const tmpFile = path.join(os.tmpdir(), 'relay-prompt-' + Date.now() + '.txt');
     fs.writeFileSync(tmpFile, prompt, 'utf8');
 
-    const flagContinue = fresh ? '' : '--continue ';
-    const cmd = `"${cfg.claudePath}" ${flagContinue}--print < "${tmpFile}"`;
-    log('[Claude]', { session: path.basename(cwd), fresh, preview: prompt.slice(0, 60).replace(/\n/g, ' ') });
+    let resumeFlag = '';
+    if (opts.mode === 'resume' && opts.sessionId) {
+      resumeFlag = `--resume ${opts.sessionId} `;
+    } else if (!opts.fresh) {
+      resumeFlag = '--continue ';
+    }
+    const cmd = `"${cfg.claudePath}" ${resumeFlag}--dangerously-skip-permissions --print < "${tmpFile}"`;
+    const cwd = opts.cwd;
+    log('[Claude]', {
+      mode: opts.mode,
+      sessionId: opts.sessionId ? opts.sessionId.slice(0, 8) : null,
+      cwd: path.basename(cwd),
+      fresh: !!opts.fresh,
+      preview: prompt.slice(0, 60).replace(/\n/g, ' '),
+    });
 
     const proc = spawn(cmd, [], { shell: true, cwd, env: process.env });
     let out = '', errText = '', settled = false;
@@ -201,25 +271,39 @@ function runClaude(prompt, cwd, dispatchId, fresh) {
 }
 
 // ── action: list_sessions ─────────────────────────────────────────────────────
+// Enumerates real Claude Code conversations from ~/.claude/projects/<encoded>/*.jsonl.
+// Each .jsonl = one conversation, filename = sessionId. cwd is read straight from
+// the first JSONL line that has a `cwd` field (more reliable than dir-name decoding).
 function listSessions() {
-  const root = path.resolve(cfg.workspaceRoot);
-  fs.mkdirSync(root, { recursive: true });
-  const entries = fs.readdirSync(root, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
-    .map((e) => {
-      const dir = path.join(root, e.name);
-      let lastModified = null;
-      let fileCount = 0;
-      try {
-        const st = fs.statSync(dir);
-        lastModified = st.mtime.toISOString();
-        const sub = fs.readdirSync(dir);
-        fileCount = sub.filter((f) => !f.startsWith('.')).length;
-      } catch {}
-      return { name: e.name, lastModified, fileCount };
-    })
-    .sort((a, b) => (b.lastModified || '').localeCompare(a.lastModified || ''));
-  return { root, sessions: entries };
+  if (!fs.existsSync(CLAUDE_PROJECTS_DIR)) {
+    return { root: CLAUDE_PROJECTS_DIR, sessions: [] };
+  }
+  const out = [];
+  for (const projDir of fs.readdirSync(CLAUDE_PROJECTS_DIR)) {
+    const dirPath = path.join(CLAUDE_PROJECTS_DIR, projDir);
+    let stat;
+    try { stat = fs.statSync(dirPath); } catch { continue; }
+    if (!stat.isDirectory()) continue;
+    let entries;
+    try { entries = fs.readdirSync(dirPath); } catch { continue; }
+    for (const file of entries) {
+      if (!file.endsWith('.jsonl')) continue;
+      const sessionId = file.replace(/\.jsonl$/, '');
+      const full = path.join(dirPath, file);
+      let st;
+      try { st = fs.statSync(full); } catch { continue; }
+      const meta = readSessionMeta(full);
+      out.push({
+        sessionId,
+        cwd: meta.cwd || '(unknown)',
+        lastModified: st.mtime.toISOString(),
+        sizeBytes: st.size,
+        firstMessagePreview: meta.firstUserMsg,
+      });
+    }
+  }
+  out.sort((a, b) => b.lastModified.localeCompare(a.lastModified));
+  return { root: CLAUDE_PROJECTS_DIR, sessions: out };
 }
 
 // ── action: new_session ───────────────────────────────────────────────────────
@@ -259,13 +343,29 @@ async function processCommand(cmd) {
 
   try {
     if (payload.action === 'run_claude') {
-      const cwd = resolveWorkspace(payload.session);
-      sysLog('info', 'run_claude_start', {
-        id: cmd.id.slice(0, 12),
-        session: payload.session,
-        taskPreview: (payload.task || '').slice(0, 80),
-      });
-      const result = await runClaude(payload.task, cwd, cmd.id, payload.fresh);
+      let opts;
+      if (payload.session_id) {
+        const info = findSessionInfo(payload.session_id);
+        if (!info) return finish(cmd.id, 'error', 'UNKNOWN_SESSION: ' + payload.session_id);
+        if (!info.cwd) return finish(cmd.id, 'error', 'SESSION_NO_CWD: ' + info.sessionId);
+        opts = { mode: 'resume', sessionId: info.sessionId, cwd: info.cwd, fresh: false };
+        sysLog('info', 'run_claude_start', {
+          id: cmd.id.slice(0, 12),
+          mode: 'resume',
+          sessionId: info.sessionId.slice(0, 8),
+          cwd: info.cwd,
+          taskPreview: (payload.task || '').slice(0, 80),
+        });
+      } else {
+        opts = { mode: 'workspace', cwd: resolveWorkspace(payload.session), fresh: payload.fresh };
+        sysLog('info', 'run_claude_start', {
+          id: cmd.id.slice(0, 12),
+          mode: 'workspace',
+          session: payload.session,
+          taskPreview: (payload.task || '').slice(0, 80),
+        });
+      }
+      const result = await runClaude(payload.task, opts, cmd.id);
       sysLog('info', 'run_claude_done', { id: cmd.id.slice(0, 12), len: result.length });
       return finish(cmd.id, 'completed', result);
     }

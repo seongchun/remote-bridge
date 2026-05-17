@@ -35,16 +35,23 @@ async function main() {
         const data = JSON.parse(result || '{}');
         const sessions = data.sessions || [];
         if (!sessions.length) {
-          console.log('(no sessions yet — use /new-session <name> to create one)');
+          console.log(`(no Claude sessions found in ${data.root || '~/.claude/projects'})`);
           process.exit(0);
         }
-        console.log(`Sessions on ${cfg.target} (${sessions.length}):`);
-        for (const s of sessions) {
+        console.log(`Claude sessions on ${cfg.target} (${sessions.length}):`);
+        console.log('Pass <id-prefix> to `/dispatch --resume` to continue any of them.\n');
+        sessions.forEach((s, i) => {
+          const idx = String(i + 1).padStart(2);
+          const idPrefix = (s.sessionId || '').slice(0, 8);
           const last = s.lastModified
             ? new Date(s.lastModified).toISOString().slice(0, 16).replace('T', ' ')
-            : 'unknown';
-          console.log(`  ${s.name.padEnd(24)} ${last}  (${s.fileCount} files)`);
-        }
+            : 'unknown          ';
+          const cwdBase = s.cwd && s.cwd !== '(unknown)'
+            ? s.cwd.split(/[\\/]/).filter(Boolean).pop() || s.cwd
+            : '(unknown)';
+          const preview = s.firstMessagePreview || '(no preview)';
+          console.log(`[${idx}] ${idPrefix}  ${last}  ${cwdBase}: ${preview}`);
+        });
       } catch {
         console.log(result);
       }

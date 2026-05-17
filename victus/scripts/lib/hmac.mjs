@@ -1,4 +1,6 @@
 // HMAC-SHA256 payload signing. Cloud signs, relay verifies.
+// Without the shared secret, an attacker with only the public anon key cannot inject
+// arbitrary commands.
 
 import { createHmac, randomBytes } from 'node:crypto';
 
@@ -6,10 +8,12 @@ const VERSION = 1;
 const DEFAULT_MAX_AGE_MS = 10 * 60 * 1000;
 
 function canonical(obj) {
+  // Only fields involved in routing/execution are signed.
   return JSON.stringify({
     action: obj.action,
     task: obj.task ?? null,
     session: obj.session ?? null,
+    session_id: obj.session_id ?? null,
     fresh: obj.fresh ?? false,
     ts: obj.ts,
     nonce: obj.nonce,
@@ -25,6 +29,7 @@ export function buildPayload(fields, secret) {
     action: fields.action,
     task: fields.task ?? null,
     session: fields.session ?? 'default',
+    session_id: fields.session_id ?? null,
     fresh: fields.fresh ?? false,
     ts: Date.now(),
     nonce: randomBytes(8).toString('hex'),
